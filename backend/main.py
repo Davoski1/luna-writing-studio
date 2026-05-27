@@ -1,7 +1,12 @@
 import os
+import sys
 import uuid
 import json
 import threading
+
+# Ensure backend directory is in the Python search path for module resolution
+sys.path.insert(0, os.path.dirname(__file__))
+
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
