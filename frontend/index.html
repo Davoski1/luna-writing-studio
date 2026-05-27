@@ -48,6 +48,8 @@
             const [inputType, setInputType] = useState("text"); // 'text' | 'url'
             const [referenceText, setReferenceText] = useState("");
             const [referenceUrl, setReferenceUrl] = useState("");
+            const [isFetchingUrl, setIsFetchingUrl] = useState(false);
+            const [scrapeMessage, setScrapeMessage] = useState(null);
             
             const [chaptersCount, setChaptersCount] = useState(5);
             const [isSubmitting, setIsSubmitting] = useState(false);
@@ -119,12 +121,43 @@
                     const data = await res.json();
                     setReferenceText("");
                     setReferenceUrl("");
+                    setScrapeMessage(null);
                     await fetchBooks();
                     setSelectedBookId(data.book_id);
                 } catch (e) {
                     console.error("Failed to adapt story", e);
                 } finally {
                     setIsSubmitting(false);
+                }
+            };
+
+            const handleFetchUrl = async (e) => {
+                e.preventDefault();
+                if (!referenceUrl.trim()) return;
+                
+                setIsFetchingUrl(true);
+                setScrapeMessage(null);
+                try {
+                    const res = await fetch(`${API_BASE}/scrape?url=${encodeURIComponent(referenceUrl)}`);
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.detail || "Failed to fetch content from URL.");
+                    }
+                    const data = await res.json();
+                    
+                    // Prepopulate Textarea context
+                    setReferenceText(data.scraped_text);
+                    
+                    // Auto-switch tabs to allow review
+                    setInputType("text");
+                    
+                    // Welcome review notification
+                    setScrapeMessage("🎉 Extracted successfully! Review, edit, or customize the scraped text below, then click Deconstruct & Adapt Concept.");
+                } catch (e) {
+                    console.error("Failed to scrape URL", e);
+                    alert(`Scraping failed: ${e.message}`);
+                } finally {
+                    setIsFetchingUrl(false);
                 }
             };
 
@@ -164,7 +197,7 @@
                         </div>
 
                         {/* Adapt Book Form */}
-                        <form onSubmit={handleCreateBook} class="p-6 border-b border-violet-900/20 flex flex-col gap-3">
+                        <form onSubmit={inputType === "url" ? handleFetchUrl : handleCreateBook} class="p-6 border-b border-violet-900/20 flex flex-col gap-3">
                             <label class="text-xs font-semibold uppercase tracking-wider text-violet-300">Adapt Novel Concept</label>
                             
                             {/* Modern Input Tabs */}
@@ -194,12 +227,29 @@
                             </div>
 
                             {inputType === "text" ? (
-                                <textarea 
-                                    class="w-full h-24 bg-gray-950 border border-violet-900/40 rounded p-2 text-xs text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-600"
-                                    placeholder="Paste reference synopsis, scene context or plot notes here to deconstruct and write a unique story..."
-                                    value={referenceText}
-                                    onChange={(e) => setReferenceText(e.target.value)}
-                                />
+                                <div class="flex flex-col gap-2">
+                                    {scrapeMessage && (
+                                        <div class="p-2 rounded bg-violet-950/80 border border-violet-500/40 text-[10px] text-violet-300 leading-relaxed relative">
+                                            <span>{scrapeMessage}</span>
+                                            <button 
+                                                type="button" 
+                                                onClick={() => setScrapeMessage(null)}
+                                                class="absolute top-1 right-2 text-violet-400 hover:text-white font-bold"
+                                            >
+                                                ×
+                                            </button>
+                                        </div>
+                                    )}
+                                    <textarea 
+                                        class="w-full h-24 bg-gray-950 border border-violet-900/40 rounded p-2 text-xs text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-600"
+                                        placeholder="Paste reference synopsis, scene context or plot notes here to deconstruct and write a unique story..."
+                                        value={referenceText}
+                                        onChange={(e) => {
+                                            setReferenceText(e.target.value);
+                                            if (scrapeMessage) setScrapeMessage(null);
+                                        }}
+                                    />
+                                </div>
                             ) : (
                                 <input 
                                     type="url"
@@ -220,14 +270,15 @@
                                     onChange={(e) => setChaptersCount(Number(e.target.value))}
                                 />
                             </div>
+                            
                             <button 
                                 type="submit"
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || isFetchingUrl}
                                 class="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-semibold py-2 rounded text-xs transition-all shadow-md shadow-violet-600/10"
                             >
-                                {isSubmitting 
-                                    ? (inputType === "url" ? "Scraping & Preparing..." : "Deconstructing...") 
-                                    : (inputType === "url" ? "Scrape & Adapt Web Novel" : "Deconstruct & Adapt Concept")}
+                                {isFetchingUrl ? "Fetching Story DNA..." :
+                                 isSubmitting ? "Deconstructing..." : 
+                                 (inputType === "url" ? "Fetch & Preview Web Novel" : "Deconstruct & Adapt Concept")}
                             </button>
                         </form>
 

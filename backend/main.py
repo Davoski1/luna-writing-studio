@@ -252,6 +252,18 @@ def generate_next_chapter(book_id: str, background_tasks: BackgroundTasks):
     background_tasks.add_task(run_gen)
     return {"status": "triggered"}
 
+@app.get("/api/scrape")
+def scrape_url(url: str):
+    """
+    Scrapes a target web novel or blog URL and returns the clean text context.
+    """
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing url parameter")
+    text = scraper.scrape_web_novel_chapters(url)
+    if text.startswith("Error:"):
+        raise HTTPException(status_code=400, detail=text)
+    return {"scraped_text": text}
+
 @app.get("/api/books/{book_id}/download")
 def download_pdf(book_id: str):
     conn = db.get_db_connection()
