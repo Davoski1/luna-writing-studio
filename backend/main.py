@@ -73,20 +73,18 @@ def background_writing_pipeline(book_id: str, reference_text: str, target_chapte
 
         # Save proposal back to books table
         conn = db.get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
+        db.execute_query(conn, """
             UPDATE books 
             SET title = ?, synopsis = ?, genre = ?, style_guide = ?, character_bible = ?, status = 'planning'
             WHERE id = ?
-        """, (title, synopsis, genre, style_guide, character_bible, book_id))
-        conn.commit()
+        """, (title, synopsis, genre, style_guide, character_bible, book_id), commit=True)
         
         # Stage 2: Generate Outline
         print(f"[Worker] Designing outline for book {book_id}...")
         outline = prompts.generate_outline(title, synopsis, proposal.get("character_bible", {}), target_chapters)
         
         for ch in outline:
-            cursor.execute("""
+            db.execute_query(conn, """
                 INSERT INTO outlines (id, book_id, chapter_number, title, goals, cliffhanger_focus, status)
                 VALUES (?, ?, ?, ?, ?, ?, 'pending')
             """, (
@@ -100,8 +98,7 @@ def background_writing_pipeline(book_id: str, reference_text: str, target_chapte
         conn.commit()
         
         # Update status to ready for drafting
-        cursor.execute("UPDATE books SET status = 'drafting' WHERE id = ?", (book_id,))
-        conn.commit()
+        db.execute_query(conn, "UPDATE books SET status = 'drafting' WHERE id = ?", (book_id,), commit=True)
         conn.close()
         print(f"[Worker] Pipeline initialization completed successfully for book {book_id}.")
         
@@ -109,8 +106,7 @@ def background_writing_pipeline(book_id: str, reference_text: str, target_chapte
         print(f"[Worker Error] Pipeline failed: {e}")
         # Mark as failed in status
         conn = db.get_db_connection()
-        conn.cursor().execute("UPDATE books SET status = 'failed' WHERE id = ?", (book_id,))
-        conn.commit()
+        db.execute_query(conn, "UPDATE books SET status = 'failed' WHERE id = ?", (book_id,), commit=True)
         conn.close()
 
 def generate_chapter_sync(book_id: str):
@@ -118,35 +114,33 @@ def generate_chapter_sync(book_id: str):
     Helper function to generate the NEXT pending chapter in sequence.
     """
     conn = db.get_db_connection()
-    cursor = conn.cursor()
     
     # 1. Fetch Book Details
-    book = cursor.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
+    book = db.execute_query(conn, "SELECT * FROM books WHERE id = ?", (book_id,), fetch_one=True)
     if not book:
         conn.close()
         return False, "Book not found"
         
     # 2. Find Next Pending Chapter outline
-    next_outline = cursor.execute("""
+    next_outline = db.execute_query(conn, """
         SELECT * FROM outlines 
         WHERE book_id = ? AND status = 'pending' 
         ORDER BY chapter_number ASC LIMIT 1
-    """, (book_id,)).fetchone()
+    """, (book_id,), fetch_one=True)
     
     if not next_outline:
         # Mark book as completed
-        cursor.execute("UPDATE books SET status = 'completed' WHERE id = ?", (book_id,))
-        conn.commit()
+        db.execute_query(conn, "UPDATE books SET status = 'completed' WHERE id = ?", (book_id,), commit=True)
         conn.close()
         return True, "All chapters are already drafted."
 
     # 3. Retrieve previous chapter context if chapter_number > 1
     previous_chapter_text = ""
     if next_outline["chapter_number"] > 1:
-        prev_ch = cursor.execute("""
+        prev_ch = db.execute_query(conn, """
             SELECT content FROM chapters 
             WHERE book_id = ? AND chapter_number = ?
-        """, (book_id, next_outline["chapter_number"] - 1)).fetchone()
+        """, (book_id, next_outline["chapter_number"] - 1), fetch_one=True)
         if prev_ch:
             previous_chapter_text = prev_ch["content"]
 
@@ -169,20 +163,18 @@ def generate_chapter_sync(book_id: str):
     # 5. Save drafted chapter to DB and mark outline status
     word_count = len(chapter_content.split())
     conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
+    db.execute_query(conn, """
         INSERT INTO chapters (id, book_id, chapter_number, title, content, word_count)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (str(uuid.uuid4()), book_id, next_outline["chapter_number"], next_outline["title"], chapter_content, word_count))
     
-    cursor.execute("UPDATE outlines SET status = 'completed' WHERE id = ?", (next_outline["id"],))
-    conn.commit()
+    db.execute_query(conn, "UPDATE outlines SET status = 'completed' WHERE id = ?", (next_outline["id"],), commit=True)
 
     # Re-check if any pending chapters remain
-    remaining = cursor.execute("SELECT COUNT(*) FROM outlines WHERE book_id = ? AND status = 'pending'", (book_id,)).fetchone()[0]
+    remaining_res = db.execute_query(conn, "SELECT COUNT(*) as total FROM outlines WHERE book_id = ? AND status = 'pending'", (book_id,), fetch_one=True)
+    remaining = remaining_res["total"] if remaining_res else 0
     if remaining == 0:
-         cursor.execute("UPDATE books SET status = 'completed' WHERE id = ?", (book_id,))
-         conn.commit()
+         db.execute_query(conn, "UPDATE books SET status = 'completed' WHERE id = ?", (book_id,), commit=True)
 
     conn.close()
     return True, f"Chapter {next_outline['chapter_number']} generated."
@@ -191,12 +183,10 @@ def generate_chapter_sync(book_id: str):
 def create_book(req: BookCreateRequest, background_tasks: BackgroundTasks):
     book_id = str(uuid.uuid4())
     conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
+    db.execute_query(conn, """
         INSERT INTO books (id, title, status, target_chapters)
         VALUES (?, 'Preparing Novel Adaptation...', 'processing', ?)
-    """, (book_id, req.target_chapters))
-    conn.commit()
+    """, (book_id, req.target_chapters), commit=True)
     conn.close()
 
     # Run adaptation pipeline asynchronously in background task
@@ -206,20 +196,20 @@ def create_book(req: BookCreateRequest, background_tasks: BackgroundTasks):
 @app.get("/api/books")
 def list_books():
     conn = db.get_db_connection()
-    books = conn.execute("SELECT * FROM books ORDER BY created_at DESC").fetchall()
+    books = db.execute_query(conn, "SELECT * FROM books ORDER BY created_at DESC", fetch_all=True)
     conn.close()
     return [dict(b) for b in books]
 
 @app.get("/api/books/{book_id}")
 def get_book_details(book_id: str):
     conn = db.get_db_connection()
-    book = conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
+    book = db.execute_query(conn, "SELECT * FROM books WHERE id = ?", (book_id,), fetch_one=True)
     if not book:
         conn.close()
         raise HTTPException(status_code=404, detail="Book not found")
     
-    outlines = conn.execute("SELECT * FROM outlines WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,)).fetchall()
-    chapters = conn.execute("SELECT * FROM chapters WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,)).fetchall()
+    outlines = db.execute_query(conn, "SELECT * FROM outlines WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,), fetch_all=True)
+    chapters = db.execute_query(conn, "SELECT * FROM chapters WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,), fetch_all=True)
     conn.close()
     
     return {
@@ -242,12 +232,12 @@ def generate_next_chapter(book_id: str, background_tasks: BackgroundTasks):
 @app.get("/api/books/{book_id}/download")
 def download_pdf(book_id: str):
     conn = db.get_db_connection()
-    book = conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
+    book = db.execute_query(conn, "SELECT * FROM books WHERE id = ?", (book_id,), fetch_one=True)
     if not book:
         conn.close()
         raise HTTPException(status_code=404, detail="Book not found")
         
-    chapters = conn.execute("SELECT * FROM chapters WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,)).fetchall()
+    chapters = db.execute_query(conn, "SELECT * FROM chapters WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,), fetch_all=True)
     conn.close()
     
     if not chapters:

@@ -21,6 +21,33 @@ def get_db_connection():
         conn.row_factory = sqlite3.Row
         return conn
 
+def execute_query(conn, query, params=(), fetch_all=False, fetch_one=False, commit=False):
+    """
+    Executes a query safely across both SQLite and PostgreSQL.
+    Converts '?' placeholders to '%s' if running on Postgres.
+    """
+    is_sqlite = type(conn).__module__.startswith("sqlite3")
+    
+    if not is_sqlite:
+        query = query.replace("?", "%s")
+        
+    cursor = conn.cursor()
+    cursor.execute(query, params)
+    
+    if commit:
+        conn.commit()
+        
+    if fetch_all:
+        res = cursor.fetchall()
+        cursor.close()
+        return res
+    elif fetch_one:
+        res = cursor.fetchone()
+        cursor.close()
+        return res
+        
+    return cursor
+
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
