@@ -44,7 +44,11 @@
             const [books, setBooks] = useState([]);
             const [selectedBookId, setSelectedBookId] = useState(null);
             const [bookDetails, setBookDetails] = useState(null);
+            
+            const [inputType, setInputType] = useState("text"); // 'text' | 'url'
             const [referenceText, setReferenceText] = useState("");
+            const [referenceUrl, setReferenceUrl] = useState("");
+            
             const [chaptersCount, setChaptersCount] = useState(5);
             const [isSubmitting, setIsSubmitting] = useState(false);
             const [activeTab, setActiveTab] = useState("chapters"); // 'chapters' | 'outlines' | 'bible'
@@ -92,19 +96,29 @@
 
             const handleCreateBook = async (e) => {
                 e.preventDefault();
-                if (!referenceText.trim()) return;
+                
+                const payload = {
+                    target_chapters: chaptersCount
+                };
+                
+                if (inputType === "text") {
+                    if (!referenceText.trim()) return;
+                    payload.reference_text = referenceText;
+                } else {
+                    if (!referenceUrl.trim()) return;
+                    payload.reference_url = referenceUrl;
+                }
+                
                 setIsSubmitting(true);
                 try {
                     const res = await fetch(`${API_BASE}/books`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            reference_text: referenceText,
-                            target_chapters: chaptersCount
-                        })
+                        body: JSON.stringify(payload)
                     });
                     const data = await res.json();
                     setReferenceText("");
+                    setReferenceUrl("");
                     await fetchBooks();
                     setSelectedBookId(data.book_id);
                 } catch (e) {
@@ -152,12 +166,50 @@
                         {/* Adapt Book Form */}
                         <form onSubmit={handleCreateBook} class="p-6 border-b border-violet-900/20 flex flex-col gap-3">
                             <label class="text-xs font-semibold uppercase tracking-wider text-violet-300">Adapt Novel Concept</label>
-                            <textarea 
-                                class="w-full h-24 bg-gray-950 border border-violet-900/40 rounded p-2 text-xs text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-600"
-                                placeholder="Paste reference synopsis, scene context or plot notes here to deconstruct and write a unique story..."
-                                value={referenceText}
-                                onChange={(e) => setReferenceText(e.target.value)}
-                            />
+                            
+                            {/* Modern Input Tabs */}
+                            <div class="flex bg-gray-950 border border-violet-900/40 rounded p-0.5 gap-1 mb-1">
+                                <button 
+                                    type="button"
+                                    onClick={() => setInputType("text")}
+                                    class={`flex-1 py-1 rounded text-[10px] font-semibold transition-all ${
+                                        inputType === "text" 
+                                            ? "bg-violet-600 text-white shadow" 
+                                            : "text-gray-400 hover:text-gray-200"
+                                    }`}
+                                >
+                                    Paste Text
+                                </button>
+                                <button 
+                                    type="button"
+                                    onClick={() => setInputType("url")}
+                                    class={`flex-1 py-1 rounded text-[10px] font-semibold transition-all ${
+                                        inputType === "url" 
+                                            ? "bg-violet-600 text-white shadow" 
+                                            : "text-gray-400 hover:text-gray-200"
+                                    }`}
+                                >
+                                    Web URL
+                                </button>
+                            </div>
+
+                            {inputType === "text" ? (
+                                <textarea 
+                                    class="w-full h-24 bg-gray-950 border border-violet-900/40 rounded p-2 text-xs text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-600"
+                                    placeholder="Paste reference synopsis, scene context or plot notes here to deconstruct and write a unique story..."
+                                    value={referenceText}
+                                    onChange={(e) => setReferenceText(e.target.value)}
+                                />
+                            ) : (
+                                <input 
+                                    type="url"
+                                    class="w-full bg-gray-950 border border-violet-900/40 rounded p-2 text-xs text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-600"
+                                    placeholder="https://www.goodnovel.com/book_info/..."
+                                    value={referenceUrl}
+                                    onChange={(e) => setReferenceUrl(e.target.value)}
+                                />
+                            )}
+
                             <div class="flex gap-2 items-center justify-between">
                                 <span class="text-xs text-gray-400">Target Chapters:</span>
                                 <input 
@@ -173,7 +225,9 @@
                                 disabled={isSubmitting}
                                 class="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-semibold py-2 rounded text-xs transition-all shadow-md shadow-violet-600/10"
                             >
-                                {isSubmitting ? "Deconstructing..." : "Deconstruct & Adapt Concept"}
+                                {isSubmitting 
+                                    ? (inputType === "url" ? "Scraping & Preparing..." : "Deconstructing...") 
+                                    : (inputType === "url" ? "Scrape & Adapt Web Novel" : "Deconstruct & Adapt Concept")}
                             </button>
                         </form>
 
@@ -198,6 +252,7 @@
                                             <span class={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
                                                 book.status === 'completed' ? 'bg-green-950/50 text-green-400' :
                                                 book.status === 'drafting' ? 'bg-violet-950/50 text-violet-400' :
+                                                book.status === 'failed' ? 'bg-red-950/50 text-red-400' :
                                                 'bg-yellow-950/50 text-yellow-400'
                                             }`}>{book.status}</span>
                                         </div>

@@ -16,6 +16,7 @@ import db
 import prompts
 import compiler
 import storage
+import scraper
 
 app = FastAPI(title="Writing Agent API")
 
@@ -51,16 +52,34 @@ def startup():
     db.init_db()
 
 class BookCreateRequest(BaseModel):
-    reference_text: str
+    reference_text: str = None
+    reference_url: str = None
     target_chapters: int = 5
 
-def background_writing_pipeline(book_id: str, reference_text: str, target_chapters: int):
+def background_writing_pipeline(book_id: str, reference_text: str, reference_url: str, target_chapters: int):
     """
     Background worker that runs the Stage 1 & Stage 2 pipelines:
-    1. Deconstruct and Adapt reference text to unique title, synopsis, character_bible
-    2. Generate structured multi-chapter outline
+    1. Scrape novel text if reference_url is provided
+    2. Deconstruct and Adapt reference text to unique title, synopsis, character_bible
+    3. Generate structured multi-chapter outline
     """
     try:
+        # Scrape web novel if URL is provided
+        if reference_url:
+            print(f"[Worker] Scraping web novel from URL: {reference_url}...")
+            scraped_text = scraper.scrape_web_novel_chapters(reference_url)
+            if scraped_text.startswith("Error:"):
+                raise Exception(scraped_text)
+            reference_text = scraped_text
+            
+            # Update title in database to reflect parsing progress
+            conn = db.get_db_connection()
+            db.execute_query(conn, "UPDATE books SET title = 'Analyzing Scraped DNA...' WHERE id = ?", (book_id,), commit=True)
+            conn.close()
+
+        if not reference_text or len(reference_text.strip()) == 0:
+            raise Exception("No reference text provided or scraping returned empty results.")
+
         # Stage 1: Deconstruction
         print(f"[Worker] Starting deconstruction for book {book_id}...")
         proposal = prompts.deconstruct_and_adapt(reference_text)
@@ -182,15 +201,19 @@ def generate_chapter_sync(book_id: str):
 @app.post("/api/books")
 def create_book(req: BookCreateRequest, background_tasks: BackgroundTasks):
     book_id = str(uuid.uuid4())
+    
+    # Determine initial display title
+    display_title = "Scraping Novel DNA..." if req.reference_url else "Preparing Novel Adaptation..."
+    
     conn = db.get_db_connection()
     db.execute_query(conn, """
         INSERT INTO books (id, title, status, target_chapters)
-        VALUES (?, 'Preparing Novel Adaptation...', 'processing', ?)
-    """, (book_id, req.target_chapters), commit=True)
+        VALUES (?, ?, 'processing', ?)
+    """, (book_id, display_title, req.target_chapters), commit=True)
     conn.close()
 
     # Run adaptation pipeline asynchronously in background task
-    background_tasks.add_task(background_writing_pipeline, book_id, req.reference_text, req.target_chapters)
+    background_tasks.add_task(background_writing_pipeline, book_id, req.reference_text, req.reference_url, req.target_chapters)
     return {"book_id": book_id, "status": "processing"}
 
 @app.get("/api/books")
