@@ -3,7 +3,7 @@ import uuid
 import json
 import threading
 from fastapi import FastAPI, BackgroundTasks, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -28,6 +28,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/", response_class=HTMLResponse)
+def serve_frontend():
+    """
+    Serves the visual single-page dashboard directly on the root path.
+    """
+    frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "index.html")
+    if os.path.exists(frontend_path):
+        with open(frontend_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h1>Luna AI Writing Studio - Frontend file index.html not found!</h1>"
 
 # Ensure DB is initialized before startup
 @app.on_event("startup")

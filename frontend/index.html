@@ -36,9 +36,9 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        const API_BASE = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost" || window.location.protocol === "file:"
+        const API_BASE = window.location.protocol === "file:"
             ? "http://127.0.0.1:8000/api"
-            : "https://luna-writing-api-99880.azurewebsites.net/api";
+            : "/api";
 
         function App() {
             const [books, setBooks] = useState([]);
