@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luna AI Writing Dashboard</title>
+    <!-- Tailwind CSS for modern responsive styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & Babel via CDN for immediate execution without setup -->
+    <script src="https://unpkg.com/react@17/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Google Fonts: Outfit -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: radial-gradient(circle at top left, #120e24, #06050b);
+        }
+        /* Custom scrollbars for a premium dark aesthetic */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #8b5cf6;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="text-gray-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_BASE = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost" || window.location.protocol === "file:"
+            ? "http://127.0.0.1:8000/api"
+            : "https://luna-writing-api-99880.azurewebsites.net/api";
+
+        function App() {
+            const [books, setBooks] = useState([]);
+            const [selectedBookId, setSelectedBookId] = useState(null);
+            const [bookDetails, setBookDetails] = useState(null);
+            const [referenceText, setReferenceText] = useState("");
+            const [chaptersCount, setChaptersCount] = useState(5);
+            const [isSubmitting, setIsSubmitting] = useState(false);
+            const [activeTab, setActiveTab] = useState("chapters"); // 'chapters' | 'outlines' | 'bible'
+            const [isGenerating, setIsGenerating] = useState(false);
+
+            // Fetch list of books on load
+            const fetchBooks = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/books`);
+                    const data = await res.json();
+                    setBooks(data);
+                    if (data.length > 0 && !selectedBookId) {
+                        setSelectedBookId(data[0].id);
+                    }
+                } catch (e) {
+                    console.error("Failed to load books from API", e);
+                }
+            };
+
+            // Fetch specific book details
+            const fetchBookDetails = async (id) => {
+                if (!id) return;
+                try {
+                    const res = await fetch(`${API_BASE}/books/${id}`);
+                    const data = await res.json();
+                    setBookDetails(data);
+                } catch (e) {
+                    console.error("Failed to load book details", e);
+                }
+            };
+
+            useEffect(() => {
+                fetchBooks();
+            }, []);
+
+            useEffect(() => {
+                fetchBookDetails(selectedBookId);
+                // Setup auto-polling every 5 seconds to show active progress
+                const interval = setInterval(() => {
+                    fetchBookDetails(selectedBookId);
+                    fetchBooks();
+                }, 5000);
+                return () => clearInterval(interval);
+            }, [selectedBookId]);
+
+            const handleCreateBook = async (e) => {
+                e.preventDefault();
+                if (!referenceText.trim()) return;
+                setIsSubmitting(true);
+                try {
+                    const res = await fetch(`${API_BASE}/books`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            reference_text: referenceText,
+                            target_chapters: chaptersCount
+                        })
+                    });
+                    const data = await res.json();
+                    setReferenceText("");
+                    await fetchBooks();
+                    setSelectedBookId(data.book_id);
+                } catch (e) {
+                    console.error("Failed to adapt story", e);
+                } finally {
+                    setIsSubmitting(false);
+                }
+            };
+
+            const triggerNextChapter = async () => {
+                if (!selectedBookId) return;
+                setIsGenerating(true);
+                try {
+                    await fetch(`${API_BASE}/books/${selectedBookId}/generate_next`, { method: "POST" });
+                    setTimeout(() => {
+                        fetchBookDetails(selectedBookId);
+                        setIsGenerating(false);
+                    }, 2000);
+                } catch (e) {
+                    console.error("Failed to draft chapter", e);
+                    setIsGenerating(false);
+                }
+            };
+
+            const getProgressPercentage = () => {
+                if (!bookDetails || !bookDetails.outlines || bookDetails.outlines.length === 0) return 0;
+                const completed = bookDetails.outlines.filter(o => o.status === 'completed').length;
+                return Math.round((completed / bookDetails.outlines.length) * 100);
+            };
+
+            const activeBook = books.find(b => b.id === selectedBookId);
+
+            return (
+                <div class="flex h-screen overflow-hidden">
+                    {/* 1. Sidebar - Book Selector & Premises */}
+                    <div class="w-80 bg-gray-900 border-r border-violet-900/30 flex flex-col h-full">
+                        <div class="p-6 border-b border-violet-900/30 flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center font-bold text-white shadow-lg shadow-violet-500/20">L</div>
+                            <div>
+                                <h1 class="font-bold text-lg text-violet-400">Luna AI</h1>
+                                <p class="text-xs text-gray-400">GoodNovel Writing Studio</p>
+                            </div>
+                        </div>
+
+                        {/* Adapt Book Form */}
+                        <form onSubmit={handleCreateBook} class="p-6 border-b border-violet-900/20 flex flex-col gap-3">
+                            <label class="text-xs font-semibold uppercase tracking-wider text-violet-300">Adapt Novel Concept</label>
+                            <textarea 
+                                class="w-full h-24 bg-gray-950 border border-violet-900/40 rounded p-2 text-xs text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-600"
+                                placeholder="Paste reference synopsis, scene context or plot notes here to deconstruct and write a unique story..."
+                                value={referenceText}
+                                onChange={(e) => setReferenceText(e.target.value)}
+                            />
+                            <div class="flex gap-2 items-center justify-between">
+                                <span class="text-xs text-gray-400">Target Chapters:</span>
+                                <input 
+                                    type="number" 
+                                    min="1" max="100" 
+                                    class="w-16 bg-gray-950 border border-violet-900/40 rounded p-1 text-center text-xs text-violet-400"
+                                    value={chaptersCount}
+                                    onChange={(e) => setChaptersCount(Number(e.target.value))}
+                                />
+                            </div>
+                            <button 
+                                type="submit"
+                                disabled={isSubmitting}
+                                class="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-semibold py-2 rounded text-xs transition-all shadow-md shadow-violet-600/10"
+                            >
+                                {isSubmitting ? "Deconstructing..." : "Deconstruct & Adapt Concept"}
+                            </button>
+                        </form>
+
+                        {/* List of active projects */}
+                        <div class="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
+                            <label class="text-xs font-semibold uppercase tracking-wider text-gray-500 px-2">Projects</label>
+                            {books.length === 0 ? (
+                                <p class="text-xs text-gray-600 text-center py-6">No writing projects active.</p>
+                            ) : (
+                                books.map(book => (
+                                    <div 
+                                        key={book.id}
+                                        onClick={() => setSelectedBookId(book.id)}
+                                        class={`p-3 rounded-lg cursor-pointer transition-all border ${
+                                            selectedBookId === book.id 
+                                                ? "bg-violet-950/40 border-violet-500/60 shadow-lg shadow-violet-950/30" 
+                                                : "bg-gray-950/30 border-transparent hover:bg-gray-800/40"
+                                        }`}
+                                    >
+                                        <div class="flex justify-between items-start gap-2 mb-1">
+                                            <h4 class="font-semibold text-sm text-gray-200 truncate">{book.title}</h4>
+                                            <span class={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                                                book.status === 'completed' ? 'bg-green-950/50 text-green-400' :
+                                                book.status === 'drafting' ? 'bg-violet-950/50 text-violet-400' :
+                                                'bg-yellow-950/50 text-yellow-400'
+                                            }`}>{book.status}</span>
+                                        </div>
+                                        <p class="text-[11px] text-gray-400 line-clamp-1">{book.synopsis || "Adapting premise details..."}</p>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
+                    {/* 2. Main Workstation Area */}
+                    <div class="flex-1 flex flex-col h-full bg-gray-950/40">
+                        {bookDetails ? (
+                            <div class="flex-1 flex flex-col overflow-hidden">
+                                {/* Dashboard Top Header */}
+                                <div class="p-6 bg-gray-900/60 border-b border-violet-900/10 flex justify-between items-center gap-6">
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-3">
+                                            <h2 class="text-xl font-bold text-gray-100 truncate">{bookDetails.book.title}</h2>
+                                            <span class="bg-violet-900/40 border border-violet-500/30 text-violet-300 text-xs px-2.5 py-0.5 rounded-full">{bookDetails.book.genre}</span>
+                                        </div>
+                                        <p class="text-xs text-gray-400 mt-1 line-clamp-1 italic">{bookDetails.book.synopsis}</p>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div class="flex items-center gap-3 shrink-0">
+                                        {bookDetails.book.status === 'drafting' && (
+                                            <button 
+                                                onClick={triggerNextChapter}
+                                                disabled={isGenerating || getProgressPercentage() === 100}
+                                                class="bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-lg shadow-violet-600/10"
+                                            >
+                                                {isGenerating ? "Drafting Chapter..." : "Draft Next Chapter"}
+                                            </button>
+                                        )}
+                                        {bookDetails.chapters.length > 0 && (
+                                            <a 
+                                                href={`${API_BASE}/books/${selectedBookId}/download`}
+                                                target="_blank"
+                                                class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-lg shadow-green-600/10 flex items-center gap-2"
+                                            >
+                                                Download PDF / HTML
+                                            </a>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Progress Bar Header */}
+                                <div class="px-6 py-4 bg-gray-900/40 border-b border-violet-900/10 flex items-center justify-between gap-6">
+                                    <div class="flex-1 flex items-center gap-4">
+                                        <span class="text-xs text-gray-400">Chapters:</span>
+                                        <div class="flex-1 bg-gray-900 rounded-full h-3 overflow-hidden border border-violet-900/20">
+                                            <div 
+                                                class="bg-gradient-to-r from-violet-600 to-indigo-500 h-full rounded-full transition-all duration-1000"
+                                                style={{ width: `${getProgressPercentage()}%` }}
+                                            />
+                                        </div>
+                                        <span class="text-xs font-semibold text-violet-400">{getProgressPercentage()}%</span>
+                                    </div>
+                                </div>
+
+                                {/* Main Dashboard Columns */}
+                                <div class="flex-1 flex overflow-hidden">
+                                    
+                                    {/* Outline Side Tracker */}
+                                    <div class="w-80 border-r border-violet-900/10 bg-gray-900/30 overflow-y-auto p-4 flex flex-col gap-2">
+                                        <h3 class="text-xs font-bold uppercase tracking-wider text-violet-400 px-1 mb-2">Book Outline Mapping</h3>
+                                        {bookDetails.outlines.length === 0 ? (
+                                            <p class="text-xs text-gray-600 text-center py-10">Deconstructing outline plots...</p>
+                                        ) : (
+                                            bookDetails.outlines.map(o => (
+                                                <div 
+                                                    key={o.id}
+                                                    class={`p-3 rounded-lg border text-xs transition-colors ${
+                                                        o.status === 'completed' 
+                                                            ? 'bg-green-950/20 border-green-900/40 text-green-300' 
+                                                            : 'bg-gray-900/50 border-gray-800 text-gray-400'
+                                                    }`}
+                                                >
+                                                    <div class="flex justify-between items-center mb-1">
+                                                        <span class="font-bold">Chapter {o.chapter_number}</span>
+                                                        <span class={`text-[9px] px-1 rounded font-semibold ${
+                                                            o.status === 'completed' ? 'bg-green-900/40 text-green-400' : 'bg-gray-800 text-gray-500'
+                                                        }`}>{o.status}</span>
+                                                    </div>
+                                                    <h5 class="font-semibold text-gray-300 mb-1">{o.title}</h5>
+                                                    <p class="text-[10px] text-gray-500 leading-relaxed mb-1"><span class="text-violet-400/60 font-semibold">Goals:</span> {o.goals}</p>
+                                                    <p class="text-[10px] text-gray-500 leading-relaxed"><span class="text-indigo-400/60 font-semibold">Hook:</span> {o.cliffhanger_focus}</p>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+
+                                    {/* Tabs and Novel Content Previewer */}
+                                    <div class="flex-1 flex flex-col overflow-hidden">
+                                        {/* Navigation Tabs */}
+                                        <div class="flex bg-gray-900/80 border-b border-violet-900/10">
+                                            <button 
+                                                onClick={() => setActiveTab("chapters")}
+                                                class={`px-6 py-3 text-sm font-semibold border-b-2 transition-all ${
+                                                    activeTab === "chapters" ? "border-violet-500 text-violet-400 bg-violet-950/10" : "border-transparent text-gray-400 hover:text-gray-200"
+                                                }`}
+                                            >
+                                                Compiled Draft Preview
+                                            </button>
+                                            <button 
+                                                onClick={() => setActiveTab("bible")}
+                                                class={`px-6 py-3 text-sm font-semibold border-b-2 transition-all ${
+                                                    activeTab === "bible" ? "border-violet-500 text-violet-400 bg-violet-950/10" : "border-transparent text-gray-400 hover:text-gray-200"
+                                                }`}
+                                            >
+                                                Novel Bible
+                                            </button>
+                                        </div>
+
+                                        {/* Dynamic Content Panel */}
+                                        <div class="flex-1 overflow-y-auto p-8">
+                                            {activeTab === "chapters" && (
+                                                <div class="max-w-2xl mx-auto space-y-12">
+                                                    {bookDetails.chapters.length === 0 ? (
+                                                        <div class="text-center py-20 text-gray-600">
+                                                            <svg class="mx-auto h-12 w-12 text-gray-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                                                            </svg>
+                                                            <p class="text-sm">Click "Draft Next Chapter" to begin writing your novel draft sequentially.</p>
+                                                        </div>
+                                                    ) : (
+                                                        bookDetails.chapters.map(ch => (
+                                                            <article key={ch.id} class="border-b border-violet-900/10 pb-12">
+                                                                <h3 class="text-xl font-bold text-violet-400 mb-6">Chapter {ch.chapter_number}: {ch.title}</h3>
+                                                                <div class="text-gray-300 font-serif leading-relaxed text-base space-y-4 whitespace-pre-line">
+                                                                    {ch.content}
+                                                                </div>
+                                                            </article>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {activeTab === "bible" && (
+                                                <div class="max-w-2xl mx-auto space-y-6">
+                                                    <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-6">
+                                                        <h4 class="font-bold text-violet-400 mb-2">Style Manual</h4>
+                                                        <p class="text-sm text-gray-300 leading-relaxed whitespace-pre-line">{bookDetails.book.style_guide}</p>
+                                                    </div>
+                                                    
+                                                    {bookDetails.book.character_bible && (
+                                                        <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-6">
+                                                            <h4 class="font-bold text-violet-400 mb-4">Character Ledger</h4>
+                                                            <div class="space-y-4">
+                                                                {Object.entries(JSON.parse(bookDetails.book.character_bible)).map(([role, char]) => (
+                                                                    <div key={role} class="border-b border-violet-900/5 pb-4 last:border-0 last:pb-0">
+                                                                        <span class="text-xs uppercase tracking-wider text-violet-500 font-semibold">{role.replace("_", " ")}</span>
+                                                                        <h5 class="font-bold text-gray-200 mt-1">{char.name} (Age: {char.age})</h5>
+                                                                        <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Backstory:</span> {char.backstory}</p>
+                                                                        <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Motivations:</span> {char.desires}</p>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </div>
+                        ) : (
+                            <div class="flex-1 flex items-center justify-center">
+                                <div class="text-center text-gray-500">
+                                    <svg class="mx-auto h-16 w-16 text-violet-600/40 mb-4 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                    <h3 class="font-semibold text-gray-300 text-lg">Luna Studio Workstation</h3>
+                                    <p class="text-xs mt-1">Select an active novel project or adapt a new concept using the sidebar.</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>

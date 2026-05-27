@@ -1,0 +1,22 @@
+# Credentials and Secrets
+backend/.env
+.env
+publish_profile.xml
+vm_connection_info.txt
+init_vm.sh
+
+# Python caches and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv
+pip-log.txt
+
+# VS Code and System files
+.vscode/
+.DS_Store
+Thumbs.db
