@@ -18,13 +18,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Create and start virtual environment
+      - name: Install dependencies
         run: |
-          python -m venv venv
-          source venv/bin/activate
-          pip install -r requirements.txt
+          pip install --target=".python_packages/lib/site-packages" -r requirements.txt
 
-      # Upload the project directory to GitHub artifacts (excludes venv to keep package small)
+      # Upload the project directory to GitHub artifacts (excludes venv but includes .python_packages)
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
