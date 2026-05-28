@@ -22,7 +22,7 @@ OCR_API_ENDPOINT = os.getenv("OCR_API_ENDPOINT", AZURE_OPENAI_ENDPOINT)
 OCR_API_KEY = os.getenv("OCR_API_KEY", AZURE_OPENAI_KEY)
 OCR_API_MODEL = os.getenv("OCR_API_MODEL", API_MODEL)
 
-def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, endpoint_url=None, api_key=None, model_name=None):
+def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, endpoint_url=None, api_key=None, model_name=None, temperature=None):
     """
     Standard request caller for Azure OpenAI / OpenAI serverless endpoints. Supports multimodal image payloads.
     Allows dynamic endpoint, key, and model overrides to support dual-model workflows.
@@ -71,12 +71,15 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
             }
         ]
 
+    # Force temperature=0.0 for OCR to ensure high-fidelity literal translation, else use 0.7 for creative writing
+    actual_temp = temperature if temperature is not None else (0.0 if image_base64 else 0.7)
+
     payload = {
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ],
-        "temperature": 0.7,
+        "temperature": actual_temp,
         "max_tokens": 4000
     }
     
@@ -125,7 +128,8 @@ def extract_text_from_image(image_base64):
         image_base64=image_base64,
         endpoint_url=OCR_API_ENDPOINT,
         api_key=OCR_API_KEY,
-        model_name=OCR_API_MODEL
+        model_name=OCR_API_MODEL,
+        temperature=0.0
     )
 
 def deconstruct_and_adapt(reference_text):
