@@ -56,6 +56,7 @@
             const [activeTab, setActiveTab] = useState("chapters"); // 'chapters' | 'outlines' | 'bible'
             const [isGenerating, setIsGenerating] = useState(false);
             const [isGeneratingPlot, setIsGeneratingPlot] = useState(false);
+            const [isGeneratingCharacters, setIsGeneratingCharacters] = useState(false);
 
             // OCR Intake states
             const [ocrPageNumber, setOcrPageNumber] = useState(1);
@@ -96,6 +97,27 @@
                     alert("Network error while generating plot summary.");
                 } finally {
                     setIsGeneratingPlot(false);
+                }
+            };
+
+            const handleGenerateCharacters = async () => {
+                if (!selectedBookId) return;
+                setIsGeneratingCharacters(true);
+                try {
+                    const res = await fetch(`${API_BASE}/books/${selectedBookId}/generate_characters`, {
+                        method: "POST"
+                    });
+                    if (res.ok) {
+                        await fetchBookDetails(selectedBookId);
+                    } else {
+                        const err = await res.json();
+                        alert(err.detail || "Failed to generate character ledger.");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert("Network error while generating character ledger.");
+                } finally {
+                    setIsGeneratingCharacters(false);
                 }
             };
 
@@ -772,21 +794,65 @@
                                                                 <p class="text-sm text-gray-300 leading-relaxed whitespace-pre-line">{bookDetails.book.style_guide}</p>
                                                             </div>
                                                             
-                                                            {bookDetails.book.character_bible && (
-                                                                <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-6">
-                                                                    <h4 class="font-bold text-violet-400 mb-4">Character Ledger</h4>
-                                                                    <div class="space-y-4">
-                                                                        {Object.entries(JSON.parse(bookDetails.book.character_bible)).map(([role, char]) => (
-                                                                            <div key={role} class="border-b border-violet-900/5 pb-4 last:border-0 last:pb-0">
-                                                                                <span class="text-xs uppercase tracking-wider text-violet-500 font-semibold">{role.replace("_", " ")}</span>
-                                                                                <h5 class="font-bold text-gray-200 mt-1">{char.name} (Age: {char.age})</h5>
-                                                                                <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Backstory:</span> {char.backstory}</p>
-                                                                                <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Motivations:</span> {char.desires}</p>
+                                                            {(() => {
+                                                                let parsedBible = null;
+                                                                try {
+                                                                    if (bookDetails.book.character_bible) {
+                                                                        parsedBible = JSON.parse(bookDetails.book.character_bible);
+                                                                    }
+                                                                } catch (e) {}
+
+                                                                const hasCharacters = parsedBible && Object.keys(parsedBible).length > 0;
+
+                                                                return (
+                                                                    <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-6">
+                                                                        <div class="flex items-center justify-between border-b border-violet-900/10 pb-4 mb-4">
+                                                                            <h4 class="font-bold text-violet-400">Character Ledger</h4>
+                                                                            {hasCharacters && !isGeneratingCharacters && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={handleGenerateCharacters}
+                                                                                    class="px-3 py-1.5 text-[10px] font-semibold bg-violet-950/40 hover:bg-violet-900/60 border border-violet-800/40 hover:border-violet-600/60 text-violet-400 rounded transition-all"
+                                                                                >
+                                                                                    Sync / Re-Generate
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                        
+                                                                        {isGeneratingCharacters ? (
+                                                                            <div class="text-center py-10">
+                                                                                <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-violet-500 mx-auto mb-3"></div>
+                                                                                <p class="text-xs text-violet-400 font-semibold animate-pulse">Scanning drafted chapters... Indexing key identities...</p>
                                                                             </div>
-                                                                        ))}
+                                                                        ) : hasCharacters ? (
+                                                                            <div class="space-y-4">
+                                                                                {Object.entries(parsedBible).map(([role, char]) => (
+                                                                                    <div key={role} class="border-b border-violet-900/5 pb-4 last:border-0 last:pb-0">
+                                                                                        <span class="text-xs uppercase tracking-wider text-violet-500 font-semibold">{role.replace(/_/g, " ")}</span>
+                                                                                        <h5 class="font-bold text-gray-200 mt-1">{char.name} (Age: {char.age})</h5>
+                                                                                        <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Backstory:</span> {char.backstory}</p>
+                                                                                        <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Motivations:</span> {char.desires}</p>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div class="text-center py-10 border border-dashed border-violet-900/20 rounded p-4">
+                                                                                <svg class="mx-auto h-10 w-10 text-violet-500/30 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                                                                                </svg>
+                                                                                <p class="text-xs text-gray-500 mb-4">No characters indexed yet in your novel bible.</p>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={handleGenerateCharacters}
+                                                                                    class="px-4 py-2 text-xs font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded transition-all shadow-md"
+                                                                                >
+                                                                                    Generate Character Ledger from Chapters
+                                                                                </button>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
-                                                                </div>
-                                                            )}
+                                                                );
+                                                            })()}
                                                         </div>
                                                     )}
 

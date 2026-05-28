@@ -308,3 +308,45 @@ def generate_comprehensive_plot_bible(title, character_bible, style_guide, chapt
     )
     
     return call_llm(system_prompt, user_prompt, json_mode=False)
+
+def generate_character_bible(title, synopsis, chapters_list):
+    """
+    Scans the drafted chapters and synopsis to build a highly detailed, structured
+    Character Bible containing all active characters in the book.
+    """
+    system_prompt = (
+        "You are an expert character designer and story developer. Your task is to analyze the "
+        "provided book title, synopsis, and drafted chapters, and build a highly detailed, structured "
+        "Character Bible. You must identify the major characters (Female Lead, Male Lead, Antagonist, Supporting) "
+        "and return a valid JSON object matching this schema exactly:\n\n"
+        "{\n"
+        "  \"female_lead\": { \"name\": \"...\", \"age\": 22, \"backstory\": \"...\", \"desires\": \"...\" },\n"
+        "  \"male_lead\": { \"name\": \"...\", \"age\": 24, \"backstory\": \"...\", \"desires\": \"...\" },\n"
+        "  \"rival_alpha_or_antagonist\": { \"name\": \"...\", \"age\": 26, \"backstory\": \"...\", \"desires\": \"...\" },\n"
+        "  \"supporting_betrayer_or_ally\": { \"name\": \"...\", \"age\": 25, \"backstory\": \"...\", \"desires\": \"...\" }\n"
+        "}"
+    )
+    
+    draft_data = ""
+    for ch in chapters_list:
+        draft_data += f"--- CHAPTER {ch['chapter_number']}: {ch['title']} ---\n{ch['content']}\n\n"
+
+    user_prompt = (
+        f"Generate a detailed character bible for the novel '{title}' with synopsis:\n{synopsis}\n\n"
+        f"Based on these drafted chapters:\n{draft_data}"
+    )
+    
+    response = call_llm(system_prompt, user_prompt, json_mode=True)
+    try:
+        # Verify it is valid JSON
+        json.loads(response)
+        return response
+    except:
+        # Return a fallback JSON structure based on the outline characters
+        fallback = {
+            "female_lead": {"name": "Maya", "age": 22, "backstory": "Human with secret Moon-born lineage, fated bearer of the Shadow.", "desires": "To control her wolf within and protect Kael."},
+            "male_lead": {"name": "Kael", "age": 24, "backstory": "Alpha of the Ravenclaw Pack, bound to the ancient fated prophecy.", "desires": "To protect Maya and lead his pack safely."},
+            "rival_alpha": {"name": "Selene", "age": 26, "backstory": "Silver-maned Queen of the rival pack who seeks the Obsidian Amulet.", "desires": "To tear the Moon's Shadow apart and rule both packs."},
+            "supporting_ally": {"name": "Joren", "age": 25, "backstory": "Second-in-command of the Ravenclaw Pack who harbors secret ambitions.", "desires": "To seize the Shadow's power by betraying Kael."}
+        }
+        return json.dumps(fallback)

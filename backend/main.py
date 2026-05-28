@@ -441,3 +441,28 @@ def get_plot_bible(book_id: str):
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
     return {"plot_bible": book["plot_bible"]}
+
+@app.post("/api/books/{book_id}/generate_characters")
+def generate_characters(book_id: str):
+    conn = db.get_db_connection()
+    # 1. Fetch book details
+    book = db.execute_query(conn, "SELECT title, synopsis FROM books WHERE id = ?", (book_id,), fetch_one=True)
+    if not book:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Book not found")
+        
+    # 2. Fetch all drafted chapters
+    chapters = db.execute_query(conn, "SELECT chapter_number, title, content FROM chapters WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,), fetch_all=True)
+    
+    # 3. Call LLM to generate character bible
+    char_bible_content = prompts.generate_character_bible(
+        title=book["title"],
+        synopsis=book["synopsis"],
+        chapters_list=chapters
+    )
+    
+    # 4. Save to the database
+    db.execute_query(conn, "UPDATE books SET character_bible = ? WHERE id = ?", (char_bible_content, book_id), commit=True)
+    conn.close()
+    
+    return json.loads(char_bible_content)
