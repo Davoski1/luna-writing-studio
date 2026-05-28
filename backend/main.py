@@ -403,3 +403,41 @@ def start_ocr_adaptation(book_id: str, background_tasks: BackgroundTasks):
     # 4. Trigger the background_writing_pipeline with the compiled text
     background_tasks.add_task(background_writing_pipeline, book_id, compiled_text, None, target_chapters)
     return {"status": "triggered"}
+
+@app.post("/api/books/{book_id}/generate_plot_bible")
+def generate_plot_bible(book_id: str):
+    conn = db.get_db_connection()
+    # 1. Fetch book details
+    book = db.execute_query(conn, "SELECT title, character_bible, style_guide FROM books WHERE id = ?", (book_id,), fetch_one=True)
+    if not book:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Book not found")
+        
+    # 2. Fetch all drafted chapters
+    chapters = db.execute_query(conn, "SELECT chapter_number, title, content FROM chapters WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,), fetch_all=True)
+    if len(chapters) == 0:
+        conn.close()
+        raise HTTPException(status_code=400, detail="You must draft at least one chapter before generating a plot bible.")
+        
+    # 3. Call LLM to generate plot bible
+    plot_bible_content = prompts.generate_comprehensive_plot_bible(
+        title=book["title"],
+        character_bible=book["character_bible"],
+        style_guide=book["style_guide"],
+        chapters_list=chapters
+    )
+    
+    # 4. Save to the database
+    db.execute_query(conn, "UPDATE books SET plot_bible = ? WHERE id = ?", (plot_bible_content, book_id), commit=True)
+    conn.close()
+    
+    return {"plot_bible": plot_bible_content}
+
+@app.get("/api/books/{book_id}/plot_bible")
+def get_plot_bible(book_id: str):
+    conn = db.get_db_connection()
+    book = db.execute_query(conn, "SELECT plot_bible FROM books WHERE id = ?", (book_id,), fetch_one=True)
+    conn.close()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return {"plot_bible": book["plot_bible"]}

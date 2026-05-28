@@ -55,6 +55,7 @@
             const [isSubmitting, setIsSubmitting] = useState(false);
             const [activeTab, setActiveTab] = useState("chapters"); // 'chapters' | 'outlines' | 'bible'
             const [isGenerating, setIsGenerating] = useState(false);
+            const [isGeneratingPlot, setIsGeneratingPlot] = useState(false);
 
             // OCR Intake states
             const [ocrPageNumber, setOcrPageNumber] = useState(1);
@@ -74,6 +75,27 @@
                     }
                 } catch (e) {
                     console.error("Failed to load books from API", e);
+                }
+            };
+
+            const handleGeneratePlot = async () => {
+                if (!selectedBookId) return;
+                setIsGeneratingPlot(true);
+                try {
+                    const res = await fetch(`${API_BASE}/books/${selectedBookId}/generate_plot_bible`, {
+                        method: "POST"
+                    });
+                    if (res.ok) {
+                        await fetchBookDetails(selectedBookId);
+                    } else {
+                        const err = await res.json();
+                        alert(err.detail || "Failed to generate plot summary.");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert("Network error while generating plot summary.");
+                } finally {
+                    setIsGeneratingPlot(false);
                 }
             };
 
@@ -708,6 +730,15 @@
                                                     >
                                                         Novel Bible
                                                     </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => setActiveTab("plot")}
+                                                        class={`px-6 py-3 text-sm font-semibold border-b-2 transition-all ${
+                                                            activeTab === "plot" ? "border-violet-500 text-violet-400 bg-violet-950/10" : "border-transparent text-gray-400 hover:text-gray-200"
+                                                        }`}
+                                                    >
+                                                        Plot Summary & Roadmap
+                                                    </button>
                                                 </div>
 
                                                 {/* Dynamic Content Panel */}
@@ -754,6 +785,55 @@
                                                                             </div>
                                                                         ))}
                                                                     </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {activeTab === "plot" && (
+                                                        <div class="max-w-3xl mx-auto space-y-6">
+                                                            {isGeneratingPlot ? (
+                                                                <div class="text-center py-20">
+                                                                    <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-violet-500 mx-auto mb-4"></div>
+                                                                    <p class="text-sm text-violet-400 font-semibold animate-pulse">Analyzing drafted chapters... Designing Season 2 blueprint... Formulating core lore bible...</p>
+                                                                    <p class="text-xs text-gray-500 mt-2">Writing comprehensive 2,000-word plot synopsis...</p>
+                                                                </div>
+                                                            ) : bookDetails.book.plot_bible ? (
+                                                                <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-8 shadow-xl">
+                                                                    <div class="flex items-center justify-between border-b border-violet-900/20 pb-4 mb-6">
+                                                                        <h4 class="font-bold text-lg text-violet-400 font-serif">Comprehensive Story Synopsis & Lore Book</h4>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={handleGeneratePlot}
+                                                                            class="px-4 py-2 text-xs font-semibold bg-violet-950/40 hover:bg-violet-900/60 border border-violet-800/40 hover:border-violet-600/60 text-violet-400 rounded-md transition-all flex items-center gap-2"
+                                                                        >
+                                                                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89H18v3.3M4 14v-4h3.3" />
+                                                                            </svg>
+                                                                            Re-Generate Plot Bible
+                                                                        </button>
+                                                                    </div>
+                                                                    <div class="text-gray-300 font-serif leading-relaxed text-base space-y-4 whitespace-pre-line prose prose-invert max-w-none">
+                                                                        {bookDetails.book.plot_bible}
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div class="text-center py-20 bg-gray-950/40 border border-dashed border-violet-900/30 rounded-lg p-8">
+                                                                    <svg class="mx-auto h-16 w-16 text-violet-500/40 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                                    </svg>
+                                                                    <h4 class="text-lg font-bold text-gray-300 mb-2">Create Your Comprehensive Plot Bible</h4>
+                                                                    <p class="text-sm text-gray-500 max-w-md mx-auto mb-6">Analyze your drafted chapters to synthesize a master 2,000-word plot synopsis, lore rules, character arcs, and the upcoming Season 2 narrative trajectory.</p>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={handleGeneratePlot}
+                                                                        class="px-6 py-3 font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-md shadow-lg shadow-violet-900/20 hover:shadow-violet-900/40 transition-all flex items-center gap-2 mx-auto"
+                                                                    >
+                                                                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                                                                        </svg>
+                                                                        Generate 2,000-Word Plot Bible & Roadmap
+                                                                    </button>
                                                                 </div>
                                                             )}
                                                         </div>

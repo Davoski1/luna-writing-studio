@@ -279,3 +279,32 @@ def get_fallback_mock_response(system_prompt, user_prompt, json_mode):
             "A sudden snap of a dry branch behind her made her freeze. She spun around, but all she saw was darkness.\n\n"
             "Could it be Magnus? Or someone far worse?"
         )
+
+def generate_comprehensive_plot_bible(title, character_bible, style_guide, chapters_list):
+    """
+    Takes the drafted chapters list and generates a massive, 2,000-word comprehensive
+    novel blueprint, deep-dive plot synopsis, lore book, and future trajectory bible.
+    """
+    system_prompt = (
+        "You are an Elite Senior Publishing Director specializing in commercial web novel serialization. "
+        "Your task is to compile a massive, deeply detailed, 2000-word Plot Bible and Comprehensive Story Narrative "
+        "based on the first 5 chapters provided. Your response must be extremely thorough, formatted in beautiful "
+        "Markdown, and divided into the following clear sections:\n\n"
+        "1. EXECUTIVE STORY OVERVIEW & METRICS\n"
+        "2. CHAPTER-BY-CHAPTER DEEP DIVE SYNOPIS (Chapters 1-5 detailed breakdowns)\n"
+        "3. THE NOVEL CORE LORE BIBLE (The Obsidian Amulet, The Alpha's Shadow sigil, Prophecy mechanics, Ghost Wolves ancestry)\n"
+        "4. CHARACTER RELATIONSHIP MATRIX (Maya & Kael's fated chemistry evolution, Joren's path to betrayal, Selene's motives)\n"
+        "5. SEASON 2 & FUTURE ARC ROADMAP (A structured projection of Chapters 6-20, main conflicts, and the looming Obsidian Crown climax)\n\n"
+        "Write with highly professional literary authority, leaving no stone unturned. Make sure the output is extensive, reaching a high word count of approximately 2000 words, detailed, and completely immersive."
+    )
+    
+    draft_data = ""
+    for ch in chapters_list:
+        draft_data += f"--- CHAPTER {ch['chapter_number']}: {ch['title']} ---\n{ch['content']}\n\n"
+
+    user_prompt = (
+        f"Generate a comprehensive, 2000-word master Plot Bible based on the book '{title}' and its first 5 drafted chapters:\n\n"
+        f"{draft_data}"
+    )
+    
+    return call_llm(system_prompt, user_prompt, json_mode=False)

@@ -75,6 +75,7 @@ def init_db():
         synopsis TEXT,
         style_guide TEXT,
         character_bible TEXT,
+        plot_bible TEXT,
         status VARCHAR(50) DEFAULT 'planning',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -117,6 +118,12 @@ def init_db():
     );
     """)
     
+    # Dynamic column addition for backward compatibility
+    try:
+        cursor.execute("ALTER TABLE books ADD COLUMN plot_bible TEXT;")
+    except Exception:
+        pass
+        
     conn.commit()
     conn.close()
 
