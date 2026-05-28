@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Luna AI Writing Dashboard</title>
     <!-- Tailwind CSS for modern responsive styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- React & Babel via CDN for immediate execution without setup -->
     <script src="https://unpkg.com/react@17/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js" crossorigin></script>
@@ -27,6 +28,77 @@
         ::-webkit-scrollbar-thumb {
             background: #8b5cf6;
             border-radius: 3px;
+        }
+        /* Premium Markdown custom styling */
+        .markdown-content h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #a78bfa;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            border-b: 1px solid rgba(139, 92, 246, 0.2);
+            padding-bottom: 0.5rem;
+            font-family: 'Outfit', sans-serif;
+        }
+        .markdown-content h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #c084fc;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            font-family: 'Outfit', sans-serif;
+        }
+        .markdown-content p {
+            margin-bottom: 1rem;
+            line-height: 1.7;
+            color: #d1d5db;
+        }
+        .markdown-content ul {
+            list-style-type: disc;
+            padding-left: 1.5rem;
+            margin-bottom: 1.25rem;
+        }
+        .markdown-content li {
+            margin-bottom: 0.5rem;
+            color: #d1d5db;
+        }
+        .markdown-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+            font-size: 0.875rem;
+            background: rgba(17, 12, 40, 0.4);
+            border: 1px solid rgba(139, 92, 246, 0.15);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .markdown-content th {
+            background: rgba(139, 92, 246, 0.15);
+            color: #c084fc;
+            font-weight: 600;
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+        }
+        .markdown-content td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid rgba(139, 92, 246, 0.05);
+            color: #d1d5db;
+        }
+        .markdown-content tr:last-child td {
+            border-bottom: none;
+        }
+        .markdown-content tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .markdown-content strong {
+            color: #f3f4f6;
+            font-weight: 600;
+        }
+        .markdown-content hr {
+            border: 0;
+            border-top: 1px solid rgba(139, 92, 246, 0.15);
+            margin: 2rem 0;
         }
     </style>
 </head>
@@ -879,9 +951,10 @@
                                                                             Re-Generate Plot Bible
                                                                         </button>
                                                                     </div>
-                                                                    <div class="text-gray-300 font-serif leading-relaxed text-base space-y-4 whitespace-pre-line prose prose-invert max-w-none">
-                                                                        {bookDetails.book.plot_bible}
-                                                                    </div>
+                                                                    <div 
+                                                                        class="markdown-content text-gray-300 font-serif leading-relaxed text-base prose prose-invert max-w-none"
+                                                                        dangerouslySetInnerHTML={{ __html: marked.parse(bookDetails.book.plot_bible || "") }}
+                                                                    />
                                                                 </div>
                                                             ) : (
                                                                 <div class="text-center py-20 bg-gray-950/40 border border-dashed border-violet-900/30 rounded-lg p-8">
