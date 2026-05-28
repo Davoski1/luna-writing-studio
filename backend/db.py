@@ -1,6 +1,16 @@
 import os
 import sqlite3
 
+# Try to load environment variables from backend/.env manually to ensure resiliency
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(env_path):
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                os.environ[key.strip()] = val.strip().strip('"').strip("'")
+
 # Load PostgreSQL connection settings from environment
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
@@ -92,6 +102,17 @@ def init_db():
         title VARCHAR(255),
         content TEXT,
         word_count INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    
+    # 4. Reference Pages Table for Screenshot OCR
+    cursor.execute(f"""
+    CREATE TABLE IF NOT EXISTS reference_pages (
+        id VARCHAR(255) PRIMARY KEY,
+        book_id VARCHAR(255) NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+        page_number INTEGER NOT NULL,
+        content TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)

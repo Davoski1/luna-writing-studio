@@ -9,23 +9,61 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.5",
 }
 
-def clean_html(html_content):
+def clean_html(html_content, url=None):
     """
     Strips scripts, styles, forms, and returns clean readable paragraph blocks.
+    Tailored extraction for AO3, Royal Road, Scribble Hub, and static paid novel mirrors.
     """
     soup = BeautifulSoup(html_content, "html.parser")
     
+    # Target-specific pristine content container selectors
+    target_container = None
+    
+    if url:
+        parsed_url = urllib.parse.urlparse(url).netloc.lower()
+        if "archiveofourown.org" in parsed_url:
+            # AO3 work/chapter container
+            target_container = soup.find(class_="userstuff") or soup.find(role="article")
+        elif "royalroad.com" in parsed_url:
+            # Royal Road chapter container
+            target_container = soup.find(class_="chapter-content") or soup.find(class_="chapter-inner")
+        elif "scribblehub.com" in parsed_url:
+            # Scribble Hub narrative block
+            target_container = soup.find(id="chp_raw") or soup.find(class_="chp_raw")
+        elif any(domain in parsed_url for domain in ["boxnovel.com", "novelbin", "boxnovel", "readnovelfull"]):
+            # Popular mirror site containers
+            target_container = (
+                soup.find(class_="chr-c") or 
+                soup.find(class_="chr-content") or 
+                soup.find(id="chr-content") or
+                soup.find(class_="chapter-c")
+            )
+
+    # Use target container if found, otherwise search entire soup
+    root = target_container if target_container else soup
+
     # Remove clutter
-    for element in soup(["script", "style", "nav", "header", "footer", "form", "iframe", "noscript"]):
-        element.decompose()
+    for element in root(["script", "style", "nav", "header", "footer", "form", "iframe", "noscript", "div.author-note", "div.comment"]):
+        try:
+            element.decompose()
+        except Exception:
+            pass
         
     paragraphs = []
-    # Gather all paragraph texts
-    for p in soup.find_all("p"):
+    # Gather all paragraph texts from the cleaned root
+    for p in root.find_all("p"):
         text = p.get_text().strip()
-        if len(text) > 20 and not text.startswith("©") and "terms of service" not in text.lower():
+        # Avoid short noise, copyrights, and terms
+        if len(text) > 20 and not text.startswith("©") and not any(term in text.lower() for term in ["terms of service", "privacy policy", "all rights reserved"]):
             paragraphs.append(text)
             
+    # Fallback if no paragraphs are found inside targeted container
+    if not paragraphs:
+        for p in soup.find_all("p"):
+            text = p.get_text().strip()
+            if len(text) > 20 and not text.startswith("©") and "terms of service" not in text.lower():
+                paragraphs.append(text)
+
     return "\n\n".join(paragraphs)
 
 def scrape_web_novel_chapters(url):
@@ -76,7 +114,7 @@ def scrape_web_novel_chapters(url):
             try:
                 chap_res = requests.get(chap_url, headers=HEADERS, timeout=10)
                 chap_res.raise_for_status()
-                chap_text = clean_html(chap_res.text)
+                chap_text = clean_html(chap_res.text, chap_url)
                 if len(chap_text) > 100:
                     compiled_text.append(f"--- CHAPTER {index + 1} ({chap_url}) ---\n\n{chap_text}")
             except Exception as ex:
@@ -87,7 +125,7 @@ def scrape_web_novel_chapters(url):
             
     # Fallback: Scrape the main page directly
     print("[Scraper] No multiple chapter links found. Parsing direct page content...")
-    page_text = clean_html(response.text)
+    page_text = clean_html(response.text, url)
     
     # If the text is very short, try getting all text from main container
     if len(page_text) < 500:
@@ -95,7 +133,10 @@ def scrape_web_novel_chapters(url):
         body = soup.find("body")
         if body:
             for element in body(["script", "style", "nav", "header", "footer"]):
-                element.decompose()
+                try:
+                    element.decompose()
+                except Exception:
+                    pass
             page_text = body.get_text(separator="\n\n").strip()
             # Clean up excessive spacing
             page_text = re.sub(r'\n\s*\n+', '\n\n', page_text)

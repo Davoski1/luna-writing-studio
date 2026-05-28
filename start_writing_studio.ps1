@@ -10,7 +10,7 @@ if (Test-Path $envFile) {
         $name, $value = $_.Split('=', 2)
         $name = $name.Trim()
         $value = $value.Trim().Trim('"').Trim("'")
-        $env:$name = $value
+        [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
     }
     Write-Host "Running in cloud-backed mode (Azure Flexible SQL & Azure Storage)!" -ForegroundColor Green
 } else {

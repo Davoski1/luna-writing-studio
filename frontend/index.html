@@ -45,7 +45,7 @@
             const [selectedBookId, setSelectedBookId] = useState(null);
             const [bookDetails, setBookDetails] = useState(null);
             
-            const [inputType, setInputType] = useState("text"); // 'text' | 'url'
+            const [inputType, setInputType] = useState("text"); // 'text' | 'url' | 'ocr'
             const [referenceText, setReferenceText] = useState("");
             const [referenceUrl, setReferenceUrl] = useState("");
             const [isFetchingUrl, setIsFetchingUrl] = useState(false);
@@ -55,6 +55,13 @@
             const [isSubmitting, setIsSubmitting] = useState(false);
             const [activeTab, setActiveTab] = useState("chapters"); // 'chapters' | 'outlines' | 'bible'
             const [isGenerating, setIsGenerating] = useState(false);
+
+            // OCR Intake states
+            const [ocrPageNumber, setOcrPageNumber] = useState(1);
+            const [ocrImageFile, setOcrImageFile] = useState(null);
+            const [ocrImagePreview, setOcrImagePreview] = useState(null);
+            const [isOcrExtracting, setIsOcrExtracting] = useState(false);
+            const [ocrPagesList, setOcrPagesList] = useState([]);
 
             // Fetch list of books on load
             const fetchBooks = async () => {
@@ -82,19 +89,47 @@
                 }
             };
 
+            // Fetch reference pages for OCR intake
+            const fetchReferencePages = async (bookId) => {
+                try {
+                    const res = await fetch(`${API_BASE}/books/${bookId}/reference_pages`);
+                    const data = await res.json();
+                    setOcrPagesList(data);
+                    if (data.length > 0) {
+                        const maxPage = Math.max(...data.map(p => p.page_number));
+                        setOcrPageNumber(maxPage + 1);
+                    } else {
+                        setOcrPageNumber(1);
+                    }
+                } catch (e) {
+                    console.error("Failed to load reference pages", e);
+                }
+            };
+
             useEffect(() => {
                 fetchBooks();
             }, []);
 
             useEffect(() => {
+                if (!selectedBookId) return;
                 fetchBookDetails(selectedBookId);
+                
+                const currentBook = books.find(b => b.id === selectedBookId);
+                if (currentBook && currentBook.status === 'intake') {
+                    fetchReferencePages(selectedBookId);
+                }
+                
                 // Setup auto-polling every 5 seconds to show active progress
                 const interval = setInterval(() => {
                     fetchBookDetails(selectedBookId);
                     fetchBooks();
+                    const currentBookIter = books.find(b => b.id === selectedBookId);
+                    if (currentBookIter && currentBookIter.status === 'intake') {
+                        fetchReferencePages(selectedBookId);
+                    }
                 }, 5000);
                 return () => clearInterval(interval);
-            }, [selectedBookId]);
+            }, [selectedBookId, books]);
 
             const handleCreateBook = async (e) => {
                 e.preventDefault();
@@ -106,9 +141,13 @@
                 if (inputType === "text") {
                     if (!referenceText.trim()) return;
                     payload.reference_text = referenceText;
-                } else {
+                } else if (inputType === "url") {
                     if (!referenceUrl.trim()) return;
                     payload.reference_url = referenceUrl;
+                } else {
+                    // Screenshot OCR intake starts with both reference fields empty!
+                    payload.reference_text = "";
+                    payload.reference_url = "";
                 }
                 
                 setIsSubmitting(true);
@@ -176,6 +215,94 @@
                 }
             };
 
+            const handleImageChange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setOcrImageFile(file);
+                
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setOcrImagePreview(reader.result);
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleExtractOcr = async () => {
+                if (!ocrImagePreview || !selectedBookId) return;
+                
+                setIsOcrExtracting(true);
+                try {
+                    const res = await fetch(`${API_BASE}/books/${selectedBookId}/extract_page`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            image_base64: ocrImagePreview,
+                            page_number: ocrPageNumber
+                        })
+                    });
+                    
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.detail || "OCR Extraction failed.");
+                    }
+                    
+                    setOcrImageFile(null);
+                    setOcrImagePreview(null);
+                    await fetchReferencePages(selectedBookId);
+                } catch (e) {
+                    console.error("OCR extraction failed", e);
+                    alert(`Extraction failed: ${e.message}`);
+                } finally {
+                    setIsOcrExtracting(false);
+                }
+            };
+
+            const handleUpdatePageContent = async (pageId, newContent) => {
+                try {
+                    await fetch(`${API_BASE}/books/${selectedBookId}/reference_pages/${pageId}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ content: newContent })
+                    });
+                    setOcrPagesList(prev => prev.map(p => p.id === pageId ? { ...p, content: newContent } : p));
+                } catch (e) {
+                    console.error("Failed to update page", e);
+                }
+            };
+
+            const handleDeletePage = async (pageId) => {
+                if (!confirm("Are you sure you want to delete this page?")) return;
+                try {
+                    await fetch(`${API_BASE}/books/${selectedBookId}/reference_pages/${pageId}`, {
+                        method: "DELETE"
+                    });
+                    await fetchReferencePages(selectedBookId);
+                } catch (e) {
+                    console.error("Failed to delete page", e);
+                }
+            };
+
+            const handleStartOcrAdaptation = async () => {
+                if (!selectedBookId) return;
+                setIsSubmitting(true);
+                try {
+                    const res = await fetch(`${API_BASE}/books/${selectedBookId}/start_adaptation`, {
+                        method: "POST"
+                    });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.detail || "Failed to trigger adaptation.");
+                    }
+                    await fetchBooks();
+                    await fetchBookDetails(selectedBookId);
+                } catch (e) {
+                    console.error("Failed to start adaptation", e);
+                    alert(`Failed to start adaptation: ${e.message}`);
+                } finally {
+                    setIsSubmitting(false);
+                }
+            };
+
             const getProgressPercentage = () => {
                 if (!bookDetails || !bookDetails.outlines || bookDetails.outlines.length === 0) return 0;
                 const completed = bookDetails.outlines.filter(o => o.status === 'completed').length;
@@ -205,7 +332,7 @@
                                 <button 
                                     type="button"
                                     onClick={() => setInputType("text")}
-                                    class={`flex-1 py-1 rounded text-[10px] font-semibold transition-all ${
+                                    class={`flex-1 py-1 rounded text-[9px] font-semibold transition-all ${
                                         inputType === "text" 
                                             ? "bg-violet-600 text-white shadow" 
                                             : "text-gray-400 hover:text-gray-200"
@@ -216,7 +343,7 @@
                                 <button 
                                     type="button"
                                     onClick={() => setInputType("url")}
-                                    class={`flex-1 py-1 rounded text-[10px] font-semibold transition-all ${
+                                    class={`flex-1 py-1 rounded text-[9px] font-semibold transition-all ${
                                         inputType === "url" 
                                             ? "bg-violet-600 text-white shadow" 
                                             : "text-gray-400 hover:text-gray-200"
@@ -224,9 +351,20 @@
                                 >
                                     Web URL
                                 </button>
+                                <button 
+                                    type="button"
+                                    onClick={() => setInputType("ocr")}
+                                    class={`flex-1 py-1 rounded text-[9px] font-semibold transition-all ${
+                                        inputType === "ocr" 
+                                            ? "bg-violet-600 text-white shadow" 
+                                            : "text-gray-400 hover:text-gray-200"
+                                    }`}
+                                >
+                                    Screenshot OCR
+                                </button>
                             </div>
 
-                            {inputType === "text" ? (
+                            {inputType === "text" && (
                                 <div class="flex flex-col gap-2">
                                     {scrapeMessage && (
                                         <div class="p-2 rounded bg-violet-950/80 border border-violet-500/40 text-[10px] text-violet-300 leading-relaxed relative">
@@ -250,7 +388,9 @@
                                         }}
                                     />
                                 </div>
-                            ) : (
+                            )}
+
+                            {inputType === "url" && (
                                 <input 
                                     type="url"
                                     class="w-full bg-gray-950 border border-violet-900/40 rounded p-2 text-xs text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-600"
@@ -258,6 +398,12 @@
                                     value={referenceUrl}
                                     onChange={(e) => setReferenceUrl(e.target.value)}
                                 />
+                            )}
+
+                            {inputType === "ocr" && (
+                                <div class="p-2.5 rounded bg-violet-950/20 border border-violet-900/40 text-[10px] text-gray-400 leading-relaxed">
+                                    Creates a new intake project. You can upload screenshots page-by-page and extract text in the workspace.
+                                </div>
                             )}
 
                             <div class="flex gap-2 items-center justify-between">
@@ -278,6 +424,7 @@
                             >
                                 {isFetchingUrl ? "Fetching Story DNA..." :
                                  isSubmitting ? "Deconstructing..." : 
+                                 inputType === "ocr" ? "Create OCR Project" :
                                  (inputType === "url" ? "Fetch & Preview Web Novel" : "Deconstruct & Adapt Concept")}
                             </button>
                         </form>
@@ -318,160 +465,304 @@
                     <div class="flex-1 flex flex-col h-full bg-gray-950/40">
                         {bookDetails ? (
                             <div class="flex-1 flex flex-col overflow-hidden">
-                                {/* Dashboard Top Header */}
-                                <div class="p-6 bg-gray-900/60 border-b border-violet-900/10 flex justify-between items-center gap-6">
-                                    <div class="flex-1 min-w-0">
-                                        <div class="flex items-center gap-3">
-                                            <h2 class="text-xl font-bold text-gray-100 truncate">{bookDetails.book.title}</h2>
-                                            <span class="bg-violet-900/40 border border-violet-500/30 text-violet-300 text-xs px-2.5 py-0.5 rounded-full">{bookDetails.book.genre}</span>
+                                {bookDetails.book.status === 'intake' ? (
+                                    <div class="flex-1 flex flex-col overflow-hidden p-8 max-w-5xl mx-auto w-full">
+                                        <div class="mb-8">
+                                            <h2 class="text-2xl font-bold text-gray-100 flex items-center gap-3">
+                                                <span class="w-2 h-2 rounded-full bg-violet-500 animate-ping"></span>
+                                                Screenshot OCR Intake Workspace
+                                            </h2>
+                                            <p class="text-xs text-gray-400 mt-2">
+                                                Upload chapter screenshots one-by-one. The AI will extract the clean book prose, allowing you to edit and review the text in the ledger before adapting it.
+                                            </p>
                                         </div>
-                                        <p class="text-xs text-gray-400 mt-1 line-clamp-1 italic">{bookDetails.book.synopsis}</p>
-                                    </div>
 
-                                    {/* Action Buttons */}
-                                    <div class="flex items-center gap-3 shrink-0">
-                                        {bookDetails.book.status === 'drafting' && (
-                                            <button 
-                                                onClick={triggerNextChapter}
-                                                disabled={isGenerating || getProgressPercentage() === 100}
-                                                class="bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-lg shadow-violet-600/10"
-                                            >
-                                                {isGenerating ? "Drafting Chapter..." : "Draft Next Chapter"}
-                                            </button>
-                                        )}
-                                        {bookDetails.chapters.length > 0 && (
-                                            <a 
-                                                href={`${API_BASE}/books/${selectedBookId}/download`}
-                                                target="_blank"
-                                                class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-lg shadow-green-600/10 flex items-center gap-2"
-                                            >
-                                                Download PDF / HTML
-                                            </a>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Progress Bar Header */}
-                                <div class="px-6 py-4 bg-gray-900/40 border-b border-violet-900/10 flex items-center justify-between gap-6">
-                                    <div class="flex-1 flex items-center gap-4">
-                                        <span class="text-xs text-gray-400">Chapters:</span>
-                                        <div class="flex-1 bg-gray-900 rounded-full h-3 overflow-hidden border border-violet-900/20">
-                                            <div 
-                                                class="bg-gradient-to-r from-violet-600 to-indigo-500 h-full rounded-full transition-all duration-1000"
-                                                style={{ width: `${getProgressPercentage()}%` }}
-                                            />
-                                        </div>
-                                        <span class="text-xs font-semibold text-violet-400">{getProgressPercentage()}%</span>
-                                    </div>
-                                </div>
-
-                                {/* Main Dashboard Columns */}
-                                <div class="flex-1 flex overflow-hidden">
-                                    
-                                    {/* Outline Side Tracker */}
-                                    <div class="w-80 border-r border-violet-900/10 bg-gray-900/30 overflow-y-auto p-4 flex flex-col gap-2">
-                                        <h3 class="text-xs font-bold uppercase tracking-wider text-violet-400 px-1 mb-2">Book Outline Mapping</h3>
-                                        {bookDetails.outlines.length === 0 ? (
-                                            <p class="text-xs text-gray-600 text-center py-10">Deconstructing outline plots...</p>
-                                        ) : (
-                                            bookDetails.outlines.map(o => (
-                                                <div 
-                                                    key={o.id}
-                                                    class={`p-3 rounded-lg border text-xs transition-colors ${
-                                                        o.status === 'completed' 
-                                                            ? 'bg-green-950/20 border-green-900/40 text-green-300' 
-                                                            : 'bg-gray-900/50 border-gray-800 text-gray-400'
-                                                    }`}
-                                                >
-                                                    <div class="flex justify-between items-center mb-1">
-                                                        <span class="font-bold">Chapter {o.chapter_number}</span>
-                                                        <span class={`text-[9px] px-1 rounded font-semibold ${
-                                                            o.status === 'completed' ? 'bg-green-900/40 text-green-400' : 'bg-gray-800 text-gray-500'
-                                                        }`}>{o.status}</span>
+                                        <div class="flex-1 flex gap-8 overflow-hidden">
+                                            {/* Left Column: Screenshot uploader */}
+                                            <div class="w-96 flex flex-col gap-6 shrink-0">
+                                                <div class="bg-gray-900/60 border border-violet-900/20 rounded-xl p-6 flex flex-col gap-4 shadow-lg shadow-violet-950/20">
+                                                    <h3 class="text-xs font-bold uppercase tracking-wider text-violet-400">Upload Screenshot Page</h3>
+                                                    
+                                                    {/* Sequence Input */}
+                                                    <div class="flex items-center justify-between gap-3 bg-gray-950 border border-violet-900/40 rounded p-2.5">
+                                                        <span class="text-xs text-gray-400">Page / Sequence Number:</span>
+                                                        <input 
+                                                            type="number" 
+                                                            min="1" 
+                                                            class="w-16 bg-gray-900 border border-violet-900/40 rounded p-1 text-center text-xs text-violet-400 font-bold"
+                                                            value={ocrPageNumber}
+                                                            onChange={(e) => setOcrPageNumber(Number(e.target.value))}
+                                                        />
                                                     </div>
-                                                    <h5 class="font-semibold text-gray-300 mb-1">{o.title}</h5>
-                                                    <p class="text-[10px] text-gray-500 leading-relaxed mb-1"><span class="text-violet-400/60 font-semibold">Goals:</span> {o.goals}</p>
-                                                    <p class="text-[10px] text-gray-500 leading-relaxed"><span class="text-indigo-400/60 font-semibold">Hook:</span> {o.cliffhanger_focus}</p>
+
+                                                    {/* Upload Box */}
+                                                    <div class="relative border-2 border-dashed border-violet-900/40 hover:border-violet-500/50 rounded-lg p-6 text-center cursor-pointer transition-all bg-gray-950/40 flex flex-col items-center justify-center min-h-[200px]">
+                                                        <input 
+                                                            type="file" 
+                                                            accept="image/*"
+                                                            onChange={handleImageChange}
+                                                            class="absolute inset-0 opacity-0 cursor-pointer"
+                                                        />
+                                                        {ocrImagePreview ? (
+                                                            <div class="relative w-full h-full flex flex-col items-center gap-3">
+                                                                <img src={ocrImagePreview} class="max-h-36 rounded border border-violet-900/30 object-contain shadow-md" />
+                                                                <span class="text-[10px] text-gray-400 truncate max-w-[200px]">{ocrImageFile?.name}</span>
+                                                            </div>
+                                                        ) : (
+                                                            <div class="flex flex-col items-center gap-3">
+                                                                <svg class="h-10 w-10 text-violet-500/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                                </svg>
+                                                                <div>
+                                                                    <span class="text-xs text-violet-400 font-semibold block">Click to select photo</span>
+                                                                    <span class="text-[10px] text-gray-500 mt-1 block">Chapter screenshot (PNG/JPEG)</span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Submit OCR Button */}
+                                                    <button 
+                                                        type="button"
+                                                        onClick={handleExtractOcr}
+                                                        disabled={isOcrExtracting || !ocrImagePreview}
+                                                        class="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md shadow-violet-600/10 flex items-center justify-center gap-2"
+                                                    >
+                                                        {isOcrExtracting ? (
+                                                            <>
+                                                                <span class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                                                Extracting Prose...
+                                                            </>
+                                                        ) : "Extract Prose from Screenshot"}
+                                                    </button>
                                                 </div>
-                                            ))
-                                        )}
-                                    </div>
+                                                
+                                                {/* Run Adaptation Panel */}
+                                                {ocrPagesList.length > 0 && (
+                                                    <div class="bg-violet-950/10 border border-violet-900/30 rounded-xl p-6 flex flex-col gap-4 shadow-lg shadow-violet-950/20">
+                                                        <h3 class="text-xs font-bold uppercase tracking-wider text-violet-400">Launch Book Pipeline</h3>
+                                                        <p class="text-[11px] text-gray-400 leading-relaxed">
+                                                            Ready to write? Clicking the button will merge all <strong>{ocrPagesList.length} pages</strong> in chronological order, run the Stage 1 & 2 adaptors, and structure your outlines!
+                                                        </p>
+                                                        <button 
+                                                            type="button"
+                                                            onClick={handleStartOcrAdaptation}
+                                                            disabled={isSubmitting}
+                                                            class="w-full bg-gradient-to-r from-violet-600 to-indigo-500 hover:from-violet-500 hover:to-indigo-400 disabled:from-violet-800 text-white font-bold py-3 rounded-lg text-xs transition-all shadow-lg shadow-violet-600/20"
+                                                        >
+                                                            {isSubmitting ? "Adapting..." : "Deconstruct & Start Adaptation"}
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
 
-                                    {/* Tabs and Novel Content Previewer */}
-                                    <div class="flex-1 flex flex-col overflow-hidden">
-                                        {/* Navigation Tabs */}
-                                        <div class="flex bg-gray-900/80 border-b border-violet-900/10">
-                                            <button 
-                                                onClick={() => setActiveTab("chapters")}
-                                                class={`px-6 py-3 text-sm font-semibold border-b-2 transition-all ${
-                                                    activeTab === "chapters" ? "border-violet-500 text-violet-400 bg-violet-950/10" : "border-transparent text-gray-400 hover:text-gray-200"
-                                                }`}
-                                            >
-                                                Compiled Draft Preview
-                                            </button>
-                                            <button 
-                                                onClick={() => setActiveTab("bible")}
-                                                class={`px-6 py-3 text-sm font-semibold border-b-2 transition-all ${
-                                                    activeTab === "bible" ? "border-violet-500 text-violet-400 bg-violet-950/10" : "border-transparent text-gray-400 hover:text-gray-200"
-                                                }`}
-                                            >
-                                                Novel Bible
-                                            </button>
-                                        </div>
+                                            {/* Right Column: Dynamic Pages Ledger */}
+                                            <div class="flex-1 flex flex-col bg-gray-900/30 border border-violet-900/10 rounded-xl overflow-hidden shadow-lg shadow-violet-950/10">
+                                                <div class="p-4 bg-gray-900/60 border-b border-violet-900/10 flex justify-between items-center">
+                                                    <h3 class="text-xs font-bold uppercase tracking-wider text-violet-400">Extracted Chapters Ledger</h3>
+                                                    <span class="bg-violet-900/30 text-violet-300 text-[10px] px-2 py-0.5 rounded-full font-bold">{ocrPagesList.length} Extracted Pages</span>
+                                                </div>
 
-                                        {/* Dynamic Content Panel */}
-                                        <div class="flex-1 overflow-y-auto p-8">
-                                            {activeTab === "chapters" && (
-                                                <div class="max-w-2xl mx-auto space-y-12">
-                                                    {bookDetails.chapters.length === 0 ? (
-                                                        <div class="text-center py-20 text-gray-600">
-                                                            <svg class="mx-auto h-12 w-12 text-gray-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                                                <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                                                    {ocrPagesList.length === 0 ? (
+                                                        <div class="text-center py-24 text-gray-600 flex flex-col items-center gap-3">
+                                                            <svg class="h-12 w-12 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                                                             </svg>
-                                                            <p class="text-sm">Click "Draft Next Chapter" to begin writing your novel draft sequentially.</p>
+                                                            <p class="text-xs text-gray-500">No pages extracted yet. Upload your first chapter screenshot on the left.</p>
                                                         </div>
                                                     ) : (
-                                                        bookDetails.chapters.map(ch => (
-                                                            <article key={ch.id} class="border-b border-violet-900/10 pb-12">
-                                                                <h3 class="text-xl font-bold text-violet-400 mb-6">Chapter {ch.chapter_number}: {ch.title}</h3>
-                                                                <div class="text-gray-300 font-serif leading-relaxed text-base space-y-4 whitespace-pre-line">
-                                                                    {ch.content}
+                                                        ocrPagesList.map((page) => (
+                                                            <div key={page.id} class="bg-gray-950/40 border border-violet-900/10 rounded-lg p-4 flex flex-col gap-3 relative hover:border-violet-500/30 transition-colors">
+                                                                <div class="flex justify-between items-center">
+                                                                    <span class="bg-violet-950 border border-violet-900/50 text-violet-400 text-[10px] font-bold px-2 py-0.5 rounded">Page {page.page_number}</span>
+                                                                    <div class="flex items-center gap-2">
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => handleDeletePage(page.id)}
+                                                                            class="text-red-500 hover:text-red-400 font-semibold text-[10px] bg-red-950/30 border border-red-900/20 px-2 py-1 rounded transition-colors"
+                                                                        >
+                                                                            Delete
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
-                                                            </article>
+                                                                
+                                                                <textarea 
+                                                                    class="w-full h-40 bg-gray-950 border border-violet-950 rounded p-3 text-xs text-gray-300 font-serif leading-relaxed focus:outline-none focus:border-violet-500 transition-colors"
+                                                                    value={page.content}
+                                                                    onChange={(e) => {
+                                                                        setOcrPagesList(prev => prev.map(p => p.id === page.id ? { ...p, content: e.target.value } : p));
+                                                                    }}
+                                                                    onBlur={(e) => handleUpdatePageContent(page.id, e.target.value)}
+                                                                    placeholder="Review or edit extracted text here..."
+                                                                />
+                                                                <div class="text-[9px] text-gray-500 text-right italic">Auto-saves on edit focus lost.</div>
+                                                            </div>
                                                         ))
                                                     )}
                                                 </div>
-                                            )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div class="flex-1 flex flex-col overflow-hidden">
+                                        {/* Dashboard Top Header */}
+                                        <div class="p-6 bg-gray-900/60 border-b border-violet-900/10 flex justify-between items-center gap-6">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex items-center gap-3">
+                                                    <h2 class="text-xl font-bold text-gray-100 truncate">{bookDetails.book.title}</h2>
+                                                    <span class="bg-violet-900/40 border border-violet-500/30 text-violet-300 text-xs px-2.5 py-0.5 rounded-full">{bookDetails.book.genre}</span>
+                                                </div>
+                                                <p class="text-xs text-gray-400 mt-1 line-clamp-1 italic">{bookDetails.book.synopsis}</p>
+                                            </div>
 
-                                            {activeTab === "bible" && (
-                                                <div class="max-w-2xl mx-auto space-y-6">
-                                                    <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-6">
-                                                        <h4 class="font-bold text-violet-400 mb-2">Style Manual</h4>
-                                                        <p class="text-sm text-gray-300 leading-relaxed whitespace-pre-line">{bookDetails.book.style_guide}</p>
-                                                    </div>
-                                                    
-                                                    {bookDetails.book.character_bible && (
-                                                        <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-6">
-                                                            <h4 class="font-bold text-violet-400 mb-4">Character Ledger</h4>
-                                                            <div class="space-y-4">
-                                                                {Object.entries(JSON.parse(bookDetails.book.character_bible)).map(([role, char]) => (
-                                                                    <div key={role} class="border-b border-violet-900/5 pb-4 last:border-0 last:pb-0">
-                                                                        <span class="text-xs uppercase tracking-wider text-violet-500 font-semibold">{role.replace("_", " ")}</span>
-                                                                        <h5 class="font-bold text-gray-200 mt-1">{char.name} (Age: {char.age})</h5>
-                                                                        <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Backstory:</span> {char.backstory}</p>
-                                                                        <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Motivations:</span> {char.desires}</p>
-                                                                    </div>
-                                                                ))}
+                                            {/* Action Buttons */}
+                                            <div class="flex items-center gap-3 shrink-0">
+                                                {bookDetails.book.status === 'drafting' && (
+                                                    <button 
+                                                        onClick={triggerNextChapter}
+                                                        disabled={isGenerating || getProgressPercentage() === 100}
+                                                        class="bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-lg shadow-violet-600/10"
+                                                    >
+                                                        {isGenerating ? "Drafting Chapter..." : "Draft Next Chapter"}
+                                                    </button>
+                                                )}
+                                                {bookDetails.chapters.length > 0 && (
+                                                    <a 
+                                                        href={`${API_BASE}/books/${selectedBookId}/download`}
+                                                        target="_blank"
+                                                        class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-lg shadow-green-600/10 flex items-center gap-2"
+                                                    >
+                                                        Download PDF / HTML
+                                                    </a>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Progress Bar Header */}
+                                        <div class="px-6 py-4 bg-gray-900/40 border-b border-violet-900/10 flex items-center justify-between gap-6">
+                                            <div class="flex-1 flex items-center gap-4">
+                                                <span class="text-xs text-gray-400">Chapters:</span>
+                                                <div class="flex-1 bg-gray-900 rounded-full h-3 overflow-hidden border border-violet-900/20">
+                                                    <div 
+                                                        class="bg-gradient-to-r from-violet-600 to-indigo-500 h-full rounded-full transition-all duration-1000"
+                                                        style={{ width: `${getProgressPercentage()}%` }}
+                                                    />
+                                                </div>
+                                                <span class="text-xs font-semibold text-violet-400">{getProgressPercentage()}%</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Main Dashboard Columns */}
+                                        <div class="flex-1 flex overflow-hidden">
+                                            
+                                            {/* Outline Side Tracker */}
+                                            <div class="w-80 border-r border-violet-900/10 bg-gray-900/30 overflow-y-auto p-4 flex flex-col gap-2">
+                                                <h3 class="text-xs font-bold uppercase tracking-wider text-violet-400 px-1 mb-2">Book Outline Mapping</h3>
+                                                {bookDetails.outlines.length === 0 ? (
+                                                    <p class="text-xs text-gray-600 text-center py-10">Deconstructing outline plots...</p>
+                                                ) : (
+                                                    bookDetails.outlines.map(o => (
+                                                        <div 
+                                                            key={o.id}
+                                                            class={`p-3 rounded-lg border text-xs transition-colors ${
+                                                                o.status === 'completed' 
+                                                                    ? 'bg-green-950/20 border-green-900/40 text-green-300' 
+                                                                    : 'bg-gray-900/50 border-gray-800 text-gray-400'
+                                                            }`}
+                                                        >
+                                                            <div class="flex justify-between items-center mb-1">
+                                                                <span class="font-bold">Chapter {o.chapter_number}</span>
+                                                                <span class={`text-[9px] px-1 rounded font-semibold ${
+                                                                    o.status === 'completed' ? 'bg-green-900/40 text-green-400' : 'bg-gray-800 text-gray-500'
+                                                                }`}>{o.status}</span>
                                                             </div>
+                                                            <h5 class="font-semibold text-gray-300 mb-1">{o.title}</h5>
+                                                            <p class="text-[10px] text-gray-500 leading-relaxed mb-1"><span class="text-violet-400/60 font-semibold">Goals:</span> {o.goals}</p>
+                                                            <p class="text-[10px] text-gray-500 leading-relaxed"><span class="text-indigo-400/60 font-semibold">Hook:</span> {o.cliffhanger_focus}</p>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+
+                                            {/* Tabs and Novel Content Previewer */}
+                                            <div class="flex-1 flex flex-col overflow-hidden">
+                                                {/* Navigation Tabs */}
+                                                <div class="flex bg-gray-900/80 border-b border-violet-900/10">
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => setActiveTab("chapters")}
+                                                        class={`px-6 py-3 text-sm font-semibold border-b-2 transition-all ${
+                                                            activeTab === "chapters" ? "border-violet-500 text-violet-400 bg-violet-950/10" : "border-transparent text-gray-400 hover:text-gray-200"
+                                                        }`}
+                                                    >
+                                                        Compiled Draft Preview
+                                                    </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => setActiveTab("bible")}
+                                                        class={`px-6 py-3 text-sm font-semibold border-b-2 transition-all ${
+                                                            activeTab === "bible" ? "border-violet-500 text-violet-400 bg-violet-950/10" : "border-transparent text-gray-400 hover:text-gray-200"
+                                                        }`}
+                                                    >
+                                                        Novel Bible
+                                                    </button>
+                                                </div>
+
+                                                {/* Dynamic Content Panel */}
+                                                <div class="flex-1 overflow-y-auto p-8">
+                                                    {activeTab === "chapters" && (
+                                                        <div class="max-w-2xl mx-auto space-y-12">
+                                                            {bookDetails.chapters.length === 0 ? (
+                                                                <div class="text-center py-20 text-gray-600">
+                                                                    <svg class="mx-auto h-12 w-12 text-gray-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                                                                    </svg>
+                                                                    <p class="text-sm">Click "Draft Next Chapter" to begin writing your novel draft sequentially.</p>
+                                                                </div>
+                                                            ) : (
+                                                                bookDetails.chapters.map(ch => (
+                                                                    <article key={ch.id} class="border-b border-violet-900/10 pb-12">
+                                                                        <h3 class="text-xl font-bold text-violet-400 mb-6">Chapter {ch.chapter_number}: {ch.title}</h3>
+                                                                        <div class="text-gray-300 font-serif leading-relaxed text-base space-y-4 whitespace-pre-line">
+                                                                            {ch.content}
+                                                                        </div>
+                                                                    </article>
+                                                                ))
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {activeTab === "bible" && (
+                                                        <div class="max-w-2xl mx-auto space-y-6">
+                                                            <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-6">
+                                                                <h4 class="font-bold text-violet-400 mb-2">Style Manual</h4>
+                                                                <p class="text-sm text-gray-300 leading-relaxed whitespace-pre-line">{bookDetails.book.style_guide}</p>
+                                                            </div>
+                                                            
+                                                            {bookDetails.book.character_bible && (
+                                                                <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-6">
+                                                                    <h4 class="font-bold text-violet-400 mb-4">Character Ledger</h4>
+                                                                    <div class="space-y-4">
+                                                                        {Object.entries(JSON.parse(bookDetails.book.character_bible)).map(([role, char]) => (
+                                                                            <div key={role} class="border-b border-violet-900/5 pb-4 last:border-0 last:pb-0">
+                                                                                <span class="text-xs uppercase tracking-wider text-violet-500 font-semibold">{role.replace("_", " ")}</span>
+                                                                                <h5 class="font-bold text-gray-200 mt-1">{char.name} (Age: {char.age})</h5>
+                                                                                <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Backstory:</span> {char.backstory}</p>
+                                                                                <p class="text-xs text-gray-400 mt-1 leading-relaxed"><span class="text-gray-300 font-semibold">Motivations:</span> {char.desires}</p>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
-                                            )}
+                                            </div>
+
                                         </div>
                                     </div>
-
-                                </div>
-                            </div>
+                                )
                         ) : (
                             <div class="flex-1 flex items-center justify-center">
                                 <div class="text-center text-gray-500">

@@ -56,6 +56,13 @@ class BookCreateRequest(BaseModel):
     reference_url: str = None
     target_chapters: int = 5
 
+class PageExtractRequest(BaseModel):
+    image_base64: str
+    page_number: int
+
+class PageUpdateRequest(BaseModel):
+    content: str
+
 def background_writing_pipeline(book_id: str, reference_text: str, reference_url: str, target_chapters: int):
     """
     Background worker that runs the Stage 1 & Stage 2 pipelines:
@@ -202,19 +209,28 @@ def generate_chapter_sync(book_id: str):
 def create_book(req: BookCreateRequest, background_tasks: BackgroundTasks):
     book_id = str(uuid.uuid4())
     
-    # Determine initial display title
-    display_title = "Scraping Novel DNA..." if req.reference_url else "Preparing Novel Adaptation..."
+    # Check if this is a Screenshot OCR intake project
+    is_intake = (not req.reference_text or len(req.reference_text.strip()) == 0) and (not req.reference_url or len(req.reference_url.strip()) == 0)
+    
+    if is_intake:
+        display_title = "Screenshot Adaptation Project"
+        initial_status = "intake"
+    else:
+        display_title = "Scraping Novel DNA..." if req.reference_url else "Preparing Novel Adaptation..."
+        initial_status = "processing"
     
     conn = db.get_db_connection()
     db.execute_query(conn, """
         INSERT INTO books (id, title, status, target_chapters)
-        VALUES (?, ?, 'processing', ?)
-    """, (book_id, display_title, req.target_chapters), commit=True)
+        VALUES (?, ?, ?, ?)
+    """, (book_id, display_title, initial_status, req.target_chapters), commit=True)
     conn.close()
 
-    # Run adaptation pipeline asynchronously in background task
-    background_tasks.add_task(background_writing_pipeline, book_id, req.reference_text, req.reference_url, req.target_chapters)
-    return {"book_id": book_id, "status": "processing"}
+    if not is_intake:
+        # Run adaptation pipeline asynchronously in background task
+        background_tasks.add_task(background_writing_pipeline, book_id, req.reference_text, req.reference_url, req.target_chapters)
+        
+    return {"book_id": book_id, "status": initial_status}
 
 @app.get("/api/books")
 def list_books():
@@ -304,3 +320,86 @@ def download_pdf(book_id: str):
         media_type='application/pdf' if not pdf_path.endswith('.html') else 'text/html',
         filename=pdf_filename
     )
+
+@app.post("/api/books/{book_id}/extract_page")
+def extract_book_page(book_id: str, req: PageExtractRequest):
+    # 1. Clean the base64 string if it contains prefix (e.g. "data:image/jpeg;base64,")
+    img_data = req.image_base64
+    if "," in img_data:
+        img_data = img_data.split(",", 1)[1]
+        
+    # 2. Call prompts vision function
+    print(f"[API] Extracting text from screenshot for book {book_id}, page {req.page_number}...")
+    extracted_text = prompts.extract_text_from_image(img_data)
+    
+    if extracted_text.startswith("Error:"):
+        raise HTTPException(status_code=400, detail=extracted_text)
+        
+    # 3. Save to database reference_pages table
+    conn = db.get_db_connection()
+    # Check if page already exists to update or insert
+    existing = db.execute_query(conn, "SELECT id FROM reference_pages WHERE book_id = ? AND page_number = ?", (book_id, req.page_number), fetch_one=True)
+    
+    page_id = str(uuid.uuid4())
+    if existing:
+        page_id = existing["id"]
+        db.execute_query(conn, "UPDATE reference_pages SET content = ? WHERE id = ?", (extracted_text, page_id), commit=True)
+    else:
+        db.execute_query(conn, """
+            INSERT INTO reference_pages (id, book_id, page_number, content)
+            VALUES (?, ?, ?, ?)
+        """, (page_id, book_id, req.page_number, extracted_text), commit=True)
+    conn.close()
+    
+    return {"id": page_id, "page_number": req.page_number, "content": extracted_text}
+
+@app.get("/api/books/{book_id}/reference_pages")
+def list_reference_pages(book_id: str):
+    conn = db.get_db_connection()
+    pages = db.execute_query(conn, "SELECT * FROM reference_pages WHERE book_id = ? ORDER BY page_number ASC", (book_id,), fetch_all=True)
+    conn.close()
+    return [dict(p) for p in pages]
+
+@app.put("/api/books/{book_id}/reference_pages/{page_id}")
+def update_reference_page(book_id: str, page_id: str, req: PageUpdateRequest):
+    conn = db.get_db_connection()
+    # Confirm it exists
+    existing = db.execute_query(conn, "SELECT id FROM reference_pages WHERE id = ? AND book_id = ?", (page_id, book_id), fetch_one=True)
+    if not existing:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Reference page not found")
+        
+    db.execute_query(conn, "UPDATE reference_pages SET content = ? WHERE id = ?", (req.content, page_id), commit=True)
+    conn.close()
+    return {"status": "updated"}
+
+@app.delete("/api/books/{book_id}/reference_pages/{page_id}")
+def delete_reference_page(book_id: str, page_id: str):
+    conn = db.get_db_connection()
+    db.execute_query(conn, "DELETE FROM reference_pages WHERE id = ? AND book_id = ?", (page_id, book_id), commit=True)
+    conn.close()
+    return {"status": "deleted"}
+
+@app.post("/api/books/{book_id}/start_adaptation")
+def start_ocr_adaptation(book_id: str, background_tasks: BackgroundTasks):
+    conn = db.get_db_connection()
+    # 1. Fetch all reference pages
+    pages = db.execute_query(conn, "SELECT content FROM reference_pages WHERE book_id = ? ORDER BY page_number ASC", (book_id,), fetch_all=True)
+    if not pages:
+        conn.close()
+        raise HTTPException(status_code=400, detail="No reference pages extracted yet.")
+        
+    # 2. Compile into a single reference text
+    compiled_text = "\n\n".join(p["content"] for p in pages if p["content"])
+    
+    # Get the book details to know the target chapter count
+    book = db.execute_query(conn, "SELECT target_chapters FROM books WHERE id = ?", (book_id,), fetch_one=True)
+    target_chapters = book["target_chapters"] if book else 5
+    
+    # 3. Set book status to 'processing' and display title to 'Preparing Novel Adaptation...'
+    db.execute_query(conn, "UPDATE books SET status = 'processing', title = 'Preparing Novel Adaptation...' WHERE id = ?", (book_id,), commit=True)
+    conn.close()
+    
+    # 4. Trigger the background_writing_pipeline with the compiled text
+    background_tasks.add_task(background_writing_pipeline, book_id, compiled_text, None, target_chapters)
+    return {"status": "triggered"}

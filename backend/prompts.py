@@ -2,44 +2,92 @@ import os
 import json
 import requests
 
+# Try to load environment variables from backend/.env manually to ensure resiliency
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(env_path):
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                os.environ[key.strip()] = val.strip().strip('"').strip("'")
+
 # Load environment variables (fallback to local mock values if not defined)
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "https://api.openai.com/v1/chat/completions")
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY", "")
 API_MODEL = os.getenv("API_MODEL", "gpt-4o-mini")
 
-def call_llm(system_prompt, user_prompt, json_mode=False):
+# New explicit variables for OCR model to support dual-model pipelines
+OCR_API_ENDPOINT = os.getenv("OCR_API_ENDPOINT", AZURE_OPENAI_ENDPOINT)
+OCR_API_KEY = os.getenv("OCR_API_KEY", AZURE_OPENAI_KEY)
+OCR_API_MODEL = os.getenv("OCR_API_MODEL", API_MODEL)
+
+def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, endpoint_url=None, api_key=None, model_name=None):
     """
-    Standard request caller for Azure OpenAI / OpenAI serverless endpoints.
+    Standard request caller for Azure OpenAI / OpenAI serverless endpoints. Supports multimodal image payloads.
+    Allows dynamic endpoint, key, and model overrides to support dual-model workflows.
     """
     headers = {
         "Content-Type": "application/json",
     }
     
-    endpoint_url = AZURE_OPENAI_ENDPOINT.strip()
-    # Defensive URL checking: if they pasted the base URI, append the completions endpoint
-    if endpoint_url and not endpoint_url.endswith("/chat/completions") and not endpoint_url.endswith("/completions"):
-        endpoint_url = endpoint_url.rstrip("/") + "/chat/completions"
+    # Use overrides if provided, else fall back to standard settings
+    endpoint_url = (endpoint_url or AZURE_OPENAI_ENDPOINT).strip()
+    api_key = api_key or AZURE_OPENAI_KEY
+    model_name = model_name or API_MODEL
     
-    # Handle auth header depending on whether using Azure keys or standard OpenAI keys
-    if "azure" in endpoint_url.lower():
-        headers["api-key"] = AZURE_OPENAI_KEY
+    # Check if this is an Azure AI Studio serverless (MaaS) endpoint
+    if "services.ai.azure.com" in endpoint_url or "inference.ai.azure.com" in endpoint_url:
+        from urllib.parse import urlparse
+        base_url = endpoint_url.split("?")[0]
+        parsed = urlparse(base_url)
+        endpoint_url = f"{parsed.scheme}://{parsed.netloc}/models/chat/completions"
+        
+        if "?" not in endpoint_url:
+            endpoint_url += "?api-version=2024-05-01-preview"
+            
+        # MaaS endpoints use standard Authorization Bearer header
+        headers["Authorization"] = f"Bearer {api_key}"
     else:
-        headers["Authorization"] = f"Bearer {AZURE_OPENAI_KEY}"
+        # Traditional Azure OpenAI or OpenAI keys
+        if endpoint_url and not endpoint_url.endswith("/chat/completions") and not endpoint_url.endswith("/completions"):
+            endpoint_url = endpoint_url.rstrip("/") + "/chat/completions"
+            
+        if "openai.azure.com" in endpoint_url or "azure" in endpoint_url.lower():
+            headers["api-key"] = api_key
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+    # Prepare message payload
+    user_content = user_prompt
+    if image_base64:
+        user_content = [
+            {"type": "text", "text": user_prompt},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{image_base64}"
+                }
+            }
+        ]
 
     payload = {
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
+            {"role": "user", "content": user_content}
         ],
         "temperature": 0.7,
         "max_tokens": 4000
     }
     
-    # If standard OpenAI / Azure deployment supports standard format
-    if "api.openai.com" in endpoint_url:
-        payload["model"] = API_MODEL
-        if json_mode:
-            payload["response_format"] = {"type": "json_object"}
+    # Inject model name if provided or required
+    if model_name:
+        payload["model"] = model_name
+    elif "api.openai.com" in endpoint_url or "services.ai.azure.com" in endpoint_url or "inference.ai.azure.com" in endpoint_url:
+        payload["model"] = "gpt-4o-mini"
+        
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
 
     try:
         response = requests.post(endpoint_url, headers=headers, json=payload, timeout=120)
@@ -50,6 +98,35 @@ def call_llm(system_prompt, user_prompt, json_mode=False):
         print(f"LLM API Call failed: {e}")
         # Return fallback mock generation if API is not yet configured, to keep execution running
         return get_fallback_mock_response(system_prompt, user_prompt, json_mode)
+
+def extract_text_from_image(image_base64):
+    """
+    Stage 0 - Screenshot OCR Extraction: Ingests a base64 encoded screenshot image of a book chapter,
+    invokes the OCR-specific vision capabilities (e.g. Mistral Document AI), and extracts only the pristine narrative prose.
+    It removes mobile headers, statuses, battery icons, ads, comments, navigation bars, and watermarks.
+    """
+    system_prompt = (
+        "You are an expert high-fidelity document OCR transcription editor. "
+        "Your task is to analyze the provided screenshot of a web novel chapter and extract "
+        "the raw story content text exactly as it appears. "
+        "Follow these strict formatting and extraction guidelines:\n"
+        "1. Extract ONLY the clean narrative prose. Do NOT include page headers, browser address bars, "
+        "mobile status indicators (battery, wifi, time), advertisement banners, user comment sections, "
+        "navigation links, or platform UI buttons.\n"
+        "2. Keep the paragraph breaks exactly as written. Output clean paragraphs separated by double newlines.\n"
+        "3. Do NOT add any conversational introduction, notes, or wrapper text. Start directly with the prose."
+    )
+    user_prompt = "Transcribe and extract the narrative text from this screenshot image."
+    
+    return call_llm(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        json_mode=False,
+        image_base64=image_base64,
+        endpoint_url=OCR_API_ENDPOINT,
+        api_key=OCR_API_KEY,
+        model_name=OCR_API_MODEL
+    )
 
 def deconstruct_and_adapt(reference_text):
     """
