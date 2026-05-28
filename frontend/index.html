@@ -129,6 +129,7 @@
             const [isGenerating, setIsGenerating] = useState(false);
             const [isGeneratingPlot, setIsGeneratingPlot] = useState(false);
             const [isGeneratingCharacters, setIsGeneratingCharacters] = useState(false);
+            const [authorName, setAuthorName] = useState("");
 
             // OCR Intake states
             const [ocrPageNumber, setOcrPageNumber] = useState(1);
@@ -745,13 +746,22 @@
                                                     </button>
                                                 )}
                                                 {bookDetails.chapters.length > 0 && (
-                                                    <a 
-                                                        href={`${API_BASE}/books/${selectedBookId}/download`}
-                                                        target="_blank"
-                                                        class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-lg shadow-green-600/10 flex items-center gap-2"
-                                                    >
-                                                        Download PDF / HTML
-                                                    </a>
+                                                    <div class="flex items-center gap-3">
+                                                        <input 
+                                                            type="text"
+                                                            placeholder="Your Pen Name"
+                                                            value={authorName}
+                                                            onChange={(e) => setAuthorName(e.target.value)}
+                                                            class="bg-gray-950/60 border border-violet-900/30 rounded-lg px-3 py-2 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-violet-500 transition-all w-36"
+                                                        />
+                                                        <a 
+                                                            href={`${API_BASE}/books/${selectedBookId}/download?author_name=${encodeURIComponent(authorName || "Author")}`}
+                                                            target="_blank"
+                                                            class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-lg shadow-green-600/10 flex items-center gap-2"
+                                                        >
+                                                            Download PDF / HTML
+                                                        </a>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>

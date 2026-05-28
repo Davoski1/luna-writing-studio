@@ -281,7 +281,7 @@ def scrape_url(url: str):
     return {"scraped_text": text}
 
 @app.get("/api/books/{book_id}/download")
-def download_pdf(book_id: str):
+def download_pdf(book_id: str, author_name: str = "Author"):
     conn = db.get_db_connection()
     book = db.execute_query(conn, "SELECT * FROM books WHERE id = ?", (book_id,), fetch_one=True)
     if not book:
@@ -303,7 +303,7 @@ def download_pdf(book_id: str):
     # Compile text/PDF structure
     compiler.compile_chapters(
         book_title=book["title"],
-        author_name="Luna AI Writer",
+        author_name=author_name,
         chapters=[dict(c) for c in chapters],
         output_filename=pdf_path
     )
