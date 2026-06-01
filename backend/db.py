@@ -119,16 +119,37 @@ def init_db():
     """)
     
     # Dynamic column addition for backward compatibility
+    # PostgreSQL invalidates active transactions upon statement failure.
+    # We must roll back aborted transactions and re-initialize cursors cleanly.
+    
+    # 1. Check & Add plot_bible
     try:
-        cursor.execute("ALTER TABLE books ADD COLUMN plot_bible TEXT;")
+        cursor.execute("SELECT plot_bible FROM books LIMIT 1;")
     except Exception:
-        pass
-        
+        conn.rollback()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("ALTER TABLE books ADD COLUMN plot_bible TEXT;")
+            conn.commit()
+            cursor = conn.cursor()
+        except Exception:
+            conn.rollback()
+            cursor = conn.cursor()
+            
+    # 2. Check & Add style_example_chapter
     try:
-        cursor.execute("ALTER TABLE books ADD COLUMN style_example_chapter TEXT;")
+        cursor.execute("SELECT style_example_chapter FROM books LIMIT 1;")
     except Exception:
-        pass
-        
+        conn.rollback()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("ALTER TABLE books ADD COLUMN style_example_chapter TEXT;")
+            conn.commit()
+            cursor = conn.cursor()
+        except Exception:
+            conn.rollback()
+            cursor = conn.cursor()
+            
     conn.commit()
     conn.close()
 
