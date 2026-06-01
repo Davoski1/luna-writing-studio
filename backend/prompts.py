@@ -116,7 +116,22 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
             
             response.raise_for_status()
             result = response.json()
-            return result["choices"][0]["message"]["content"]
+            if "choices" in result and len(result["choices"]) > 0:
+                first_choice = result["choices"][0]
+                message = first_choice.get("message", {})
+                
+                # Gracefully handle Azure Content Safety filters
+                if first_choice.get("finish_reason") == "content_filter":
+                    raise ValueError("The narrative text or screenshot was blocked by Azure OpenAI Content Safety filters. Please try another segment or screenshot.")
+                
+                # Check for direct model refusal
+                if "refusal" in message and message["refusal"]:
+                    raise ValueError(f"Azure model refused request: {message['refusal']}")
+                    
+                if "content" in message:
+                    return message["content"]
+                
+            raise ValueError("LLM responded with an empty or unexpected completion format (missing choices or content).")
         except Exception as e:
             # Check if this exception has a 429 status code
             is_429 = False
