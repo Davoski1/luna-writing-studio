@@ -110,11 +110,13 @@ def background_writing_pipeline(book_id: str, reference_text: str, reference_url
             SET title = ?, synopsis = ?, genre = ?, style_guide = ?, character_bible = ?, status = 'planning'
             WHERE id = ?
         """, (title, synopsis, genre, style_guide, character_bible, book_id), commit=True)
+        conn.close()
         
         # Stage 2: Generate Outline
         print(f"[Worker] Designing outline for book {book_id}...")
         outline = prompts.generate_outline(title, synopsis, proposal.get("character_bible", {}), target_chapters)
         
+        conn = db.get_db_connection()
         for ch in outline:
             db.execute_query(conn, """
                 INSERT INTO outlines (id, book_id, chapter_number, title, goals, cliffhanger_focus, status)
@@ -136,10 +138,13 @@ def background_writing_pipeline(book_id: str, reference_text: str, reference_url
         
     except Exception as e:
         print(f"[Worker Error] Pipeline failed: {e}")
-        # Mark as failed in status
-        conn = db.get_db_connection()
-        db.execute_query(conn, "UPDATE books SET status = 'failed' WHERE id = ?", (book_id,), commit=True)
-        conn.close()
+        # Mark as failed in status safely without leaking connections
+        try:
+            conn = db.get_db_connection()
+            db.execute_query(conn, "UPDATE books SET status = 'failed' WHERE id = ?", (book_id,), commit=True)
+            conn.close()
+        except Exception as db_err:
+            print(f"[Worker DB Error] Failed to update fail status: {db_err}")
 
 def generate_chapter_sync(book_id: str):
     """
@@ -423,23 +428,28 @@ def generate_plot_bible(book_id: str, req: PlotBibleRequest = None):
         
     # 2. Fetch all drafted chapters
     chapters = db.execute_query(conn, "SELECT chapter_number, title, content FROM chapters WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,), fetch_all=True)
+    conn.close() # Close immediately BEFORE long-running LLM call to release slot to pool
+    
     if len(chapters) == 0:
-        conn.close()
         raise HTTPException(status_code=400, detail="You must draft at least one chapter before generating a plot bible.")
         
     # Extract optional plot summary example
     plot_summary_example = req.plot_summary_example if req else None
 
     # 3. Call LLM to generate plot bible
-    plot_bible_content = prompts.generate_comprehensive_plot_bible(
-        title=book["title"],
-        character_bible=book["character_bible"],
-        style_guide=book["style_guide"],
-        chapters_list=chapters,
-        plot_summary_example=plot_summary_example
-    )
+    try:
+        plot_bible_content = prompts.generate_comprehensive_plot_bible(
+            title=book["title"],
+            character_bible=book["character_bible"],
+            style_guide=book["style_guide"],
+            chapters_list=chapters,
+            plot_summary_example=plot_summary_example
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate plot bible: {e}")
     
-    # 4. Save to the database
+    # 4. Save to the database (using fresh connection slot)
+    conn = db.get_db_connection()
     db.execute_query(conn, "UPDATE books SET plot_bible = ? WHERE id = ?", (plot_bible_content, book_id), commit=True)
     conn.close()
     
@@ -465,15 +475,20 @@ def generate_characters(book_id: str):
         
     # 2. Fetch all drafted chapters
     chapters = db.execute_query(conn, "SELECT chapter_number, title, content FROM chapters WHERE book_id = ? ORDER BY chapter_number ASC", (book_id,), fetch_all=True)
+    conn.close() # Close immediately BEFORE long-running LLM call to release slot to pool
     
     # 3. Call LLM to generate character bible
-    char_bible_content = prompts.generate_character_bible(
-        title=book["title"],
-        synopsis=book["synopsis"],
-        chapters_list=chapters
-    )
+    try:
+        char_bible_content = prompts.generate_character_bible(
+            title=book["title"],
+            synopsis=book["synopsis"],
+            chapters_list=chapters
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate character bible: {e}")
     
     # 4. Save to the database
+    conn = db.get_db_connection()
     db.execute_query(conn, "UPDATE books SET character_bible = ? WHERE id = ?", (char_bible_content, book_id), commit=True)
     conn.close()
     
