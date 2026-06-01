@@ -99,15 +99,45 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
  
-    try:
-        response = requests.post(endpoint_url, headers=headers, json=payload, timeout=120)
-        response.raise_for_status()
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
-    except Exception as e:
-        print(f"LLM API Call failed: {e}")
-        # Re-raise the exception so that failures are highly visible and do not silently fall back to mock data
-        raise e
+    import time
+    max_retries = 5
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(endpoint_url, headers=headers, json=payload, timeout=120)
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                wait_sec = float(retry_after) if (retry_after and retry_after.replace('.', '', 1).isdigit()) else retry_delay
+                print(f"[LLM 429] Rate limited. Retrying attempt {attempt+1}/{max_retries} after waiting {wait_sec}s...")
+                time.sleep(wait_sec)
+                retry_delay *= 2
+                continue
+            
+            response.raise_for_status()
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+        except Exception as e:
+            # Check if this exception has a 429 status code
+            is_429 = False
+            if hasattr(e, "response") and e.response is not None:
+                if e.response.status_code == 429:
+                    is_429 = True
+            
+            if is_429:
+                wait_sec = retry_delay
+                print(f"[LLM 429] Rate limited (exception). Retrying attempt {attempt+1}/{max_retries} after waiting {wait_sec}s...")
+                time.sleep(wait_sec)
+                retry_delay *= 2
+                continue
+                
+            if attempt == max_retries - 1:
+                print(f"LLM API Call failed on final attempt: {e}")
+                raise e
+            
+            print(f"LLM API Call failed on attempt {attempt+1}: {e}. Retrying after {retry_delay}s...")
+            time.sleep(retry_delay)
+            retry_delay *= 2
  
 def extract_text_from_image(image_base64):
     """
