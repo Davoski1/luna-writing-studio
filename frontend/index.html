@@ -127,9 +127,12 @@
             const [isSubmitting, setIsSubmitting] = useState(false);
             const [activeTab, setActiveTab] = useState("chapters"); // 'chapters' | 'outlines' | 'bible'
             const [isGenerating, setIsGenerating] = useState(false);
-            const [isGeneratingPlot, setIsGeneratingPlot] = useState(false);
+                        const [isGeneratingPlot, setIsGeneratingPlot] = useState(false);
             const [isGeneratingCharacters, setIsGeneratingCharacters] = useState(false);
             const [authorName, setAuthorName] = useState("");
+            const [plotSummaryExample, setPlotSummaryExample] = useState("");
+            const [isHumanizingChapter, setIsHumanizingChapter] = useState({});
+            const [isHumanizingPlot, setIsHumanizingPlot] = useState(false);
 
             // OCR Intake states
             const [ocrPageNumber, setOcrPageNumber] = useState(1);
@@ -157,7 +160,9 @@
                 setIsGeneratingPlot(true);
                 try {
                     const res = await fetch(`${API_BASE}/books/${selectedBookId}/generate_plot_bible`, {
-                        method: "POST"
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ plot_summary_example: plotSummaryExample })
                     });
                     if (res.ok) {
                         await fetchBookDetails(selectedBookId);
@@ -170,6 +175,48 @@
                     alert("Network error while generating plot summary.");
                 } finally {
                     setIsGeneratingPlot(false);
+                }
+            };
+
+            const handleHumanizeChapter = async (chapterNumber) => {
+                if (!selectedBookId) return;
+                setIsHumanizingChapter(prev => ({ ...prev, [chapterNumber]: true }));
+                try {
+                    const res = await fetch(`${API_BASE}/books/${selectedBookId}/chapters/${chapterNumber}/humanize`, {
+                        method: "POST"
+                    });
+                    if (res.ok) {
+                        await fetchBookDetails(selectedBookId);
+                    } else {
+                        const err = await res.json();
+                        alert(err.detail || "Failed to humanize chapter draft.");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert("Network error while humanizing chapter draft.");
+                } finally {
+                    setIsHumanizingChapter(prev => ({ ...prev, [chapterNumber]: false }));
+                }
+            };
+
+            const handleHumanizePlot = async () => {
+                if (!selectedBookId) return;
+                setIsHumanizingPlot(true);
+                try {
+                    const res = await fetch(`${API_BASE}/books/${selectedBookId}/humanize_plot_bible`, {
+                        method: "POST"
+                    });
+                    if (res.ok) {
+                        await fetchBookDetails(selectedBookId);
+                    } else {
+                        const err = await res.json();
+                        alert(err.detail || "Failed to humanize plot bible.");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert("Network error while humanizing plot bible.");
+                } finally {
+                    setIsHumanizingPlot(false);
                 }
             };
 
@@ -859,7 +906,27 @@
                                                             ) : (
                                                                 bookDetails.chapters.map(ch => (
                                                                     <article key={ch.id} class="border-b border-violet-900/10 pb-12">
-                                                                        <h3 class="text-xl font-bold text-violet-400 mb-6">Chapter {ch.chapter_number}: {ch.title}</h3>
+                                                                        <h3 class="text-xl font-bold text-violet-400 mb-6 flex justify-between items-center">
+                                                                            <span>Chapter {ch.chapter_number}: {ch.title}</span>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleHumanizeChapter(ch.chapter_number)}
+                                                                                disabled={isHumanizingChapter[ch.chapter_number]}
+                                                                                class="px-3 py-1.5 text-xs font-semibold bg-violet-600/90 hover:bg-violet-500 border border-violet-500/30 text-white rounded-md transition-all shadow flex items-center gap-1.5 disabled:opacity-50"
+                                                                            >
+                                                                                {isHumanizingChapter[ch.chapter_number] ? (
+                                                                                    <>
+                                                                                        <span class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                                                                        <span>Humanizing...</span>
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <>
+                                                                                        <span>✨</span>
+                                                                                        <span>Humanize Draft</span>
+                                                                                    </>
+                                                                                )}
+                                                                            </button>
+                                                                        </h3>
                                                                         <div class="text-gray-300 font-serif leading-relaxed text-base space-y-4 whitespace-pre-line">
                                                                             {ch.content}
                                                                         </div>
@@ -950,17 +1017,49 @@
                                                                 <div class="bg-gray-900/40 border border-violet-900/10 rounded-lg p-8 shadow-xl">
                                                                     <div class="flex items-center justify-between border-b border-violet-900/20 pb-4 mb-6">
                                                                         <h4 class="font-bold text-lg text-violet-400 font-serif">Comprehensive Story Synopsis & Lore Book</h4>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={handleGeneratePlot}
-                                                                            class="px-4 py-2 text-xs font-semibold bg-violet-950/40 hover:bg-violet-900/60 border border-violet-800/40 hover:border-violet-600/60 text-violet-400 rounded-md transition-all flex items-center gap-2"
-                                                                        >
-                                                                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89H18v3.3M4 14v-4h3.3" />
-                                                                            </svg>
-                                                                            Re-Generate Plot Bible
-                                                                        </button>
+                                                                        <div class="flex items-center gap-3">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={handleHumanizePlot}
+                                                                                disabled={isHumanizingPlot}
+                                                                                class="px-4 py-2 text-xs font-semibold bg-violet-600 hover:bg-violet-500 border border-violet-500/30 text-white rounded-md transition-all shadow flex items-center gap-1.5 disabled:opacity-50"
+                                                                            >
+                                                                                {isHumanizingPlot ? (
+                                                                                    <>
+                                                                                        <span class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                                                                        <span>Humanizing...</span>
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <>
+                                                                                        <span>✨</span>
+                                                                                        <span>Humanize Plot & Roadmap</span>
+                                                                                    </>
+                                                                                )}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={handleGeneratePlot}
+                                                                                class="px-4 py-2 text-xs font-semibold bg-violet-950/40 hover:bg-violet-900/60 border border-violet-800/40 hover:border-violet-600/60 text-violet-400 rounded-md transition-all flex items-center gap-2"
+                                                                            >
+                                                                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89H18v3.3M4 14v-4h3.3" />
+                                                                                </svg>
+                                                                                Re-Generate Plot Bible
+                                                                            </button>
+                                                                        </div>
                                                                     </div>
+                                                                    
+                                                                    {/* Good Example Guide Area for Re-Generation */}
+                                                                    <div class="mb-6 p-4 rounded-lg bg-violet-950/10 border border-violet-900/25">
+                                                                        <label class="block text-[10px] font-bold uppercase tracking-wider text-violet-300 mb-1.5">Gold-Standard Example Synopsis Guide (Optional)</label>
+                                                                        <textarea
+                                                                            class="w-full h-20 bg-gray-950 border border-violet-900/40 rounded p-2.5 text-xs text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-700 font-sans"
+                                                                            placeholder="Update or supply a plot synopsis example to guide the regeneration..."
+                                                                            value={plotSummaryExample}
+                                                                            onChange={(e) => setPlotSummaryExample(e.target.value)}
+                                                                        />
+                                                                    </div>
+
                                                                     <div 
                                                                         class="markdown-content text-gray-300 font-serif leading-relaxed text-base prose prose-invert max-w-none"
                                                                         dangerouslySetInnerHTML={{ __html: marked.parse(bookDetails.book.plot_bible || "") }}
@@ -973,6 +1072,18 @@
                                                                     </svg>
                                                                     <h4 class="text-lg font-bold text-gray-300 mb-2">Create Your Comprehensive Plot Bible</h4>
                                                                     <p class="text-sm text-gray-500 max-w-md mx-auto mb-6">Analyze your drafted chapters to synthesize a master 2,000-word plot synopsis, lore rules, character arcs, and the upcoming Season 2 narrative trajectory.</p>
+                                                                    
+                                                                    {/* Good Example Guide Area */}
+                                                                    <div class="max-w-md mx-auto mb-6 text-left">
+                                                                        <label class="block text-[10px] font-bold uppercase tracking-wider text-violet-300 mb-1.5">Gold-Standard Example Synopsis Guide (Optional)</label>
+                                                                        <textarea
+                                                                            class="w-full h-24 bg-gray-950 border border-violet-900/40 rounded p-2.5 text-xs text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-700 font-sans"
+                                                                            placeholder="Paste a good, engaging plot synopsis example here to guide the AI's tone and structure..."
+                                                                            value={plotSummaryExample}
+                                                                            onChange={(e) => setPlotSummaryExample(e.target.value)}
+                                                                        />
+                                                                    </div>
+
                                                                     <button
                                                                         type="button"
                                                                         onClick={handleGeneratePlot}

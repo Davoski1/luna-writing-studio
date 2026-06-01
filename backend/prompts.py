@@ -340,7 +340,7 @@ def get_fallback_mock_response(system_prompt, user_prompt, json_mode):
             "Could it be Magnus? Or someone far worse?"
         )
 
-def generate_comprehensive_plot_bible(title, character_bible, style_guide, chapters_list):
+def generate_comprehensive_plot_bible(title, character_bible, style_guide, chapters_list, plot_summary_example=None):
     """
     Takes the drafted chapters list and generates a massive, 2,000-word comprehensive
     novel blueprint, deep-dive plot synopsis, lore book, and future trajectory bible.
@@ -378,6 +378,12 @@ def generate_comprehensive_plot_bible(title, character_bible, style_guide, chapt
         f"Generate a comprehensive, 2000-word master Plot Bible based on the book '{title}' and its first 5 drafted chapters:\n\n"
         f"{draft_data}"
     )
+    if plot_summary_example and len(plot_summary_example.strip()) > 0:
+        user_prompt += (
+            f"\n\n### PLOT BIBLE REFERENCE EXAMPLE:\n"
+            f"Use the following example plot bible summary as a gold-standard guide for style, tone, and formatting in Section 2:\n"
+            f"{plot_summary_example}\n"
+        )
     
     return call_llm(system_prompt, user_prompt, json_mode=False)
 
@@ -456,4 +462,35 @@ def humanize_chapter_prose(chapter_text):
         json_mode=False,
         model_name="gpt-oss-120b"
     )
+
+def humanize_plot_bible_content(plot_bible_text):
+    """
+    Polishes and humanizes the plot bible and narrative arc, elevating the storytelling tone,
+    deepening the character relationship structures, and removing robotic filler.
+    """
+    system_prompt = (
+        "You are my smart, highly creative co-writer and premium literary editor. "
+        "We are rewriting a Plot Bible and Story Roadmap so it feels 100% alive, organic, and professional. "
+        "Talk to me and polish the concepts like a smart friend sharing a deep, masterfully plotted saga at a coffee shop.\n\n"
+        "### DIRECTIVES FOR RAW HUMAN LITERARY DEVELOPMENT:\n\n"
+        "1. Persona & Tone\n"
+        "   - Use conversational, immersive, and vivid language. Avoid sterile, mechanical, or textbook-like outlines.\n"
+        "   - Plunge the concepts into sensory depth—explain lore, relationships, and ending trajectories in highly visceral and emotional terms.\n\n"
+        "2. Spontaneous Sentence Rhythm & Flow\n"
+        "   - Vary sentence lengths and structures. Combine brief, intense descriptions with flowing, complex ideas.\n"
+        "   - Break rigid grammar constraints where it yields a more organic, captivating narrative voice.\n\n"
+        "3. Active Voice & Banned AI Markers\n"
+        "   - Maintain active constructions and high verb variety.\n"
+        "   - Strictly ban repetitive AI transitional buzzwords (e.g. delve, furthermore, moreover, testament, in conclusion, tapestry, intricate dance, shrouded).\n\n"
+        "4. Strict Data Preservation\n"
+        "   - Do NOT omit, modify, or rewrite any core facts, names, lore structures (such as Obsidian Amulet, Selene, Joren), or milestones. Elevate the tone, but do not change the story itself."
+    )
+    user_prompt = f"Here is the Plot Bible I need us to humanize:\n\n{plot_bible_text}\n\nStart directly with the humanized markdown text, preserving all headers."
+    return call_llm(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        json_mode=False,
+        model_name="gpt-oss-120b"
+    )
+
 

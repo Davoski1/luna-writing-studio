@@ -63,6 +63,10 @@ class PageExtractRequest(BaseModel):
 class PageUpdateRequest(BaseModel):
     content: str
 
+class PlotBibleRequest(BaseModel):
+    plot_summary_example: str = None
+
+
 def background_writing_pipeline(book_id: str, reference_text: str, reference_url: str, target_chapters: int):
     """
     Background worker that runs the Stage 1 & Stage 2 pipelines:
@@ -405,7 +409,7 @@ def start_ocr_adaptation(book_id: str, background_tasks: BackgroundTasks):
     return {"status": "triggered"}
 
 @app.post("/api/books/{book_id}/generate_plot_bible")
-def generate_plot_bible(book_id: str):
+def generate_plot_bible(book_id: str, req: PlotBibleRequest = None):
     conn = db.get_db_connection()
     # 1. Fetch book details
     book = db.execute_query(conn, "SELECT title, character_bible, style_guide FROM books WHERE id = ?", (book_id,), fetch_one=True)
@@ -419,12 +423,16 @@ def generate_plot_bible(book_id: str):
         conn.close()
         raise HTTPException(status_code=400, detail="You must draft at least one chapter before generating a plot bible.")
         
+    # Extract optional plot summary example
+    plot_summary_example = req.plot_summary_example if req else None
+
     # 3. Call LLM to generate plot bible
     plot_bible_content = prompts.generate_comprehensive_plot_bible(
         title=book["title"],
         character_bible=book["character_bible"],
         style_guide=book["style_guide"],
-        chapters_list=chapters
+        chapters_list=chapters,
+        plot_summary_example=plot_summary_example
     )
     
     # 4. Save to the database
@@ -505,4 +513,28 @@ def humanize_chapter(book_id: str, chapter_number: int):
         "content": humanized_content, 
         "word_count": word_count
     }
+
+@app.post("/api/books/{book_id}/humanize_plot_bible")
+def humanize_plot_bible(book_id: str):
+    conn = db.get_db_connection()
+    book = db.execute_query(conn, "SELECT id, plot_bible FROM books WHERE id = ?", (book_id,), fetch_one=True)
+    if not book:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Book not found")
+    if not book["plot_bible"]:
+        conn.close()
+        raise HTTPException(status_code=400, detail="No plot bible generated yet. Please generate it first.")
+        
+    print(f"[API] Humanizing Plot Bible for book {book_id}...")
+    try:
+        humanized_bible = prompts.humanize_plot_bible_content(book["plot_bible"])
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Humanizer failed: {e}")
+        
+    db.execute_query(conn, "UPDATE books SET plot_bible = ? WHERE id = ?", (humanized_bible, book_id), commit=True)
+    conn.close()
+    
+    return {"status": "humanized", "plot_bible": humanized_bible}
+
 
