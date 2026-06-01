@@ -201,7 +201,7 @@ def generate_outline(title, synopsis, character_bible, target_chapters):
         print(f"Failed to parse outline JSON. Raw LLM response: {response_text}")
         raise ValueError(f"Outline JSON parsing failed: {e}. Raw response: {response_text}")
 
-def generate_chapter(title, style_guide, character_bible, chapter_num, chapter_title, goals, cliffhanger_focus, previous_chapter_text=""):
+def generate_chapter(title, style_guide, character_bible, chapter_num, chapter_title, goals, cliffhanger_focus, previous_chapter_text="", style_example_chapter=None):
     """
     Stage 3: Drafts a full-length chapter based on state context and previous history.
     Inserts aggressive emotional hook guidelines for Chapter 1 and the first 5 chapters.
@@ -245,6 +245,16 @@ def generate_chapter(title, style_guide, character_bible, chapter_num, chapter_t
     if previous_chapter_text:
         user_prompt += f"Context from previous Chapter:\n{previous_chapter_text[-3000:]}\n\n"
         
+    if style_example_chapter and len(style_example_chapter.strip()) > 0:
+        user_prompt += (
+            f"### GOLD-STANDARD REFERENCE CHAPTER PROSE (STYLE ONLY - DO NOT COPY CONTENT):\n"
+            f"{style_example_chapter}\n\n"
+            f"### STYLE DIRECTION RULES FOR CHAPTER GENERATION:\n"
+            f"1. Analyze the reference chapter prose above. Mirror its paragraph layout cadence, dialogue tag variety, and sentence-level active voice formatting.\n"
+            f"2. Mimic the level of dramatic tension and sensory richness shown in this reference prose.\n"
+            f"3. STRICT CONSTRAINT: Do NOT copy or leak any character names, lore terms, settings, or events from the reference chapter. Apply ONLY its unique writing style and flow to draft this new chapter.\n\n"
+        )
+
     user_prompt += "Write the complete chapter text now. Start directly with the prose, no introduction."
     
     return call_llm(system_prompt, user_prompt, json_mode=False)
@@ -423,11 +433,12 @@ def generate_character_bible(title, synopsis, chapters_list):
         print(f"Failed to parse character bible JSON. Raw LLM response: {response}")
         raise ValueError(f"Character Bible JSON parsing failed: {e}. Raw response: {response}")
 
-def humanize_chapter_prose(chapter_text):
+def humanize_chapter_prose(chapter_text, style_example_chapter=None):
     """
     Polishes a chapter draft using our elite raw human storytelling guidelines.
     Forces dynamic sentence lengths, conversational rhythms, breaks grammar rules for pacing,
     bans repetitive formatting and overused em dashes, enforces active voice, and strips AI clichés.
+    Supports mirroring a custom gold-standard style example chapter if provided.
     """
     system_prompt = (
         "You are my smart, highly creative co-writer and premium literary editor. "
@@ -453,7 +464,18 @@ def humanize_chapter_prose(chapter_text):
         "   - Preserve all original plot elements, dialogue meanings, character names, and lore anchors. Elevate the voice and flow, but keep the story grounded."
     )
     
-    user_prompt = f"Here is the draft I need us to humanize:\n\n{chapter_text}\n\nStart directly with the humanized prose, no intro or wrapper text."
+    user_prompt = f"Here is the draft I need us to humanize:\n\n{chapter_text}\n\n"
+    if style_example_chapter and len(style_example_chapter.strip()) > 0:
+        user_prompt += (
+            f"### GOLD-STANDARD REFERENCE CHAPTER PROSE (STYLE ONLY - DO NOT COPY CONTENT):\n"
+            f"{style_example_chapter}\n\n"
+            f"### STYLE DIRECTION RULES FOR DRAFT HUMANIZATION:\n"
+            f"1. Analyze the reference chapter prose above. Mirror its vocabulary choice, paragraph rhythm, dialogue syntax, and sentence cadence.\n"
+            f"2. Mimic the level of detail, emotional internal monologue vs external action shown in this reference.\n"
+            f"3. STRICT CONSTRAINT: Do NOT copy any character names, terms, settings, or events from the reference chapter. Apply ONLY its unique writing style to rewrite our draft chapter.\n\n"
+        )
+        
+    user_prompt += "Start directly with the humanized prose, no intro or wrapper text."
     
     # We use your high-capacity creative model (gpt-oss-120b)
     return call_llm(

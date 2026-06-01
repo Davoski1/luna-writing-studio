@@ -133,6 +133,7 @@
             const [plotSummaryExample, setPlotSummaryExample] = useState("");
             const [isHumanizingChapter, setIsHumanizingChapter] = useState({});
             const [isHumanizingPlot, setIsHumanizingPlot] = useState(false);
+            const [styleExampleChapter, setStyleExampleChapter] = useState("");
 
             // OCR Intake states
             const [ocrPageNumber, setOcrPageNumber] = useState(1);
@@ -299,7 +300,8 @@
                 e.preventDefault();
                 
                 const payload = {
-                    target_chapters: chaptersCount
+                    target_chapters: chaptersCount,
+                    style_example_chapter: styleExampleChapter
                 };
                 
                 if (inputType === "text") {
@@ -324,6 +326,7 @@
                     const data = await res.json();
                     setReferenceText("");
                     setReferenceUrl("");
+                    setStyleExampleChapter("");
                     setScrapeMessage(null);
                     await fetchBooks();
                     setSelectedBookId(data.book_id);
@@ -569,6 +572,27 @@
                                     Creates a new intake project. You can upload screenshots page-by-page and extract text in the workspace.
                                 </div>
                             )}
+
+                            {/* Expandable Style Anchor Area */}
+                            <div class="border border-violet-900/30 rounded p-2.5 bg-violet-950/5">
+                                <details class="group">
+                                    <summary class="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider text-violet-400 cursor-pointer list-none select-none">
+                                        <span>✨ Reference Chapter Anchor (Optional)</span>
+                                        <span class="text-xs transition-transform group-open:rotate-180">▼</span>
+                                    </summary>
+                                    <div class="mt-2.5 flex flex-col gap-2">
+                                        <p class="text-[9px] text-gray-500 leading-relaxed">
+                                            Paste an example chapter (from your book or a favorite bestseller) to guide the AI's dialogue, paragraph cadence, and prose style.
+                                        </p>
+                                        <textarea 
+                                            class="w-full h-24 bg-gray-950 border border-violet-900/40 rounded p-2 text-[10px] text-gray-300 focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-700 font-sans"
+                                            placeholder="Paste gold-standard prose style sample chapter here..."
+                                            value={styleExampleChapter}
+                                            onChange={(e) => setStyleExampleChapter(e.target.value)}
+                                        />
+                                    </div>
+                                </details>
+                            </div>
 
                             <div class="flex gap-2 items-center justify-between">
                                 <span class="text-xs text-gray-400">Target Chapters:</span>

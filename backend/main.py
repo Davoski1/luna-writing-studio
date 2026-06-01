@@ -55,6 +55,8 @@ class BookCreateRequest(BaseModel):
     reference_text: str = None
     reference_url: str = None
     target_chapters: int = 5
+    style_example_chapter: str = None
+
 
 class PageExtractRequest(BaseModel):
     image_base64: str
@@ -179,6 +181,7 @@ def generate_chapter_sync(book_id: str):
     # 4. Invoke LLM to write chapter
     print(f"[Worker] Drafting Chapter {next_outline['chapter_number']} for book {book_id}...")
     char_bible = json.loads(book["character_bible"]) if book["character_bible"] else {}
+    style_example = dict(book).get("style_example_chapter")
     chapter_content = prompts.generate_chapter(
         title=book["title"],
         style_guide=book["style_guide"],
@@ -187,7 +190,8 @@ def generate_chapter_sync(book_id: str):
         chapter_title=next_outline["title"],
         goals=next_outline["goals"],
         cliffhanger_focus=next_outline["cliffhanger_focus"],
-        previous_chapter_text=previous_chapter_text
+        previous_chapter_text=previous_chapter_text,
+        style_example_chapter=style_example
     )
 
     # 5. Save drafted chapter to DB and mark outline status
@@ -225,9 +229,9 @@ def create_book(req: BookCreateRequest, background_tasks: BackgroundTasks):
     
     conn = db.get_db_connection()
     db.execute_query(conn, """
-        INSERT INTO books (id, title, status, target_chapters)
-        VALUES (?, ?, ?, ?)
-    """, (book_id, display_title, initial_status, req.target_chapters), commit=True)
+        INSERT INTO books (id, title, status, target_chapters, style_example_chapter)
+        VALUES (?, ?, ?, ?, ?)
+    """, (book_id, display_title, initial_status, req.target_chapters, req.style_example_chapter), commit=True)
     conn.close()
 
     if not is_intake:
@@ -478,7 +482,10 @@ def generate_characters(book_id: str):
 @app.post("/api/books/{book_id}/chapters/{chapter_number}/humanize")
 def humanize_chapter(book_id: str, chapter_number: int):
     conn = db.get_db_connection()
-    # 1. Fetch the chapter content from the database
+    # 1. Fetch the style example and chapter content from the database
+    book = db.execute_query(conn, "SELECT style_example_chapter FROM books WHERE id = ?", (book_id,), fetch_one=True)
+    style_example = book["style_example_chapter"] if book else None
+
     chapter = db.execute_query(
         conn, 
         "SELECT id, content FROM chapters WHERE book_id = ? AND chapter_number = ?", 
@@ -492,7 +499,7 @@ def humanize_chapter(book_id: str, chapter_number: int):
     # 2. Invoke the humanizer function
     print(f"[API] Humanizing Chapter {chapter_number} for book {book_id}...")
     try:
-        humanized_content = prompts.humanize_chapter_prose(chapter["content"])
+        humanized_content = prompts.humanize_chapter_prose(chapter["content"], style_example_chapter=style_example)
     except Exception as e:
         conn.close()
         raise HTTPException(status_code=500, detail=f"Humanizer failed: {e}")

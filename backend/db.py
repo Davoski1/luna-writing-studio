@@ -124,6 +124,11 @@ def init_db():
     except Exception:
         pass
         
+    try:
+        cursor.execute("ALTER TABLE books ADD COLUMN style_example_chapter TEXT;")
+    except Exception:
+        pass
+        
     conn.commit()
     conn.close()
 
