@@ -99,8 +99,8 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
         return result["choices"][0]["message"]["content"]
     except Exception as e:
         print(f"LLM API Call failed: {e}")
-        # Return fallback mock generation if API is not yet configured, to keep execution running
-        return get_fallback_mock_response(system_prompt, user_prompt, json_mode)
+        # Re-raise the exception so that failures are highly visible and do not silently fall back to mock data
+        raise e
 
 def extract_text_from_image(image_base64):
     """
@@ -159,8 +159,9 @@ def deconstruct_and_adapt(reference_text):
     response_text = call_llm(system_prompt, user_prompt, json_mode=True)
     try:
         return json.loads(response_text)
-    except:
-        return json.loads(get_fallback_mock_response(system_prompt, user_prompt, True))
+    except Exception as e:
+        print(f"Failed to parse adaptation JSON. Raw LLM response: {response_text}")
+        raise ValueError(f"Adaptation JSON parsing failed: {e}. Raw response: {response_text}")
 
 def generate_outline(title, synopsis, character_bible, target_chapters):
     """
@@ -168,7 +169,10 @@ def generate_outline(title, synopsis, character_bible, target_chapters):
     """
     system_prompt = (
         "You are an expert plot designer. Generate a structured chapter outline for a web novel. "
-        "Each chapter must have a concrete structural goal and a cliffhanger hook to keep mobile readers paying for the next chapter. "
+        "Each chapter must have a concrete structural goal and a cliffhanger hook to keep mobile readers paying for the next chapter.\n\n"
+        "STRICT CHAPTER 1 RULE: Chapter 1 must focus heavily on introducing the ultimate fated romance catalyst "
+        "(such as a fated mate rejection, pack betrayal, public exile, or family tragedy) in a dramatic, high-stakes "
+        "fashion, hooking the reader's emotions instantly within the first 1,500 words.\n\n"
         "Return a valid JSON object containing an array of chapters. Schema exactly:\n"
         "{\n"
         "  \"outline\": [\n"
@@ -186,9 +190,9 @@ def generate_outline(title, synopsis, character_bible, target_chapters):
     response_text = call_llm(system_prompt, user_prompt, json_mode=True)
     try:
         return json.loads(response_text).get("outline", [])
-    except:
-        # Generate mock array if parsing failed
-        return json.loads(get_fallback_mock_response(system_prompt, user_prompt, True)).get("outline", [])
+    except Exception as e:
+        print(f"Failed to parse outline JSON. Raw LLM response: {response_text}")
+        raise ValueError(f"Outline JSON parsing failed: {e}. Raw response: {response_text}")
 
 def generate_chapter(title, style_guide, character_bible, chapter_num, chapter_title, goals, cliffhanger_focus, previous_chapter_text=""):
     """
@@ -252,13 +256,39 @@ def get_fallback_mock_response(system_prompt, user_prompt, json_mode):
     """
     if json_mode:
         if "outline" in system_prompt.lower():
-            # Return dummy outline
+            # Return high-hook dummy werewolf romance outline that starts with immediate rejection/exile catalyst
             return json.dumps({
                 "outline": [
-                    {"chapter_number": i, "title": f"The Rising Dawn Part {i}", 
-                     "goals": f"Setup drama, progress character arc and build tension regarding the pack secrets.", 
-                     "cliffhanger_focus": "A mysterious rustle in the trees."}
-                    for i in range(1, 6)
+                    {
+                        "chapter_number": 1, 
+                        "title": "The Shattered Bond", 
+                        "goals": "Introduce fated wolf-less leader Lyra. Dramatize her public fated mate rejection and pack betrayal by Alpha Magnus, culminating in her cold banishment.", 
+                        "cliffhanger_focus": "Lyra crossing the border line into the dark, rogue-infested Obsidian Forest."
+                    },
+                    {
+                        "chapter_number": 2, 
+                        "title": "Obsidian Shadows", 
+                        "goals": "Lyra running from low-level rogue beasts in the dark forest. Reconcile with dark Alpha Kaelen who rescues her and senses a secondary, forbidden fated bond.", 
+                        "cliffhanger_focus": "The physical spark of Kaelen's touch revealing their fated marks."
+                    },
+                    {
+                        "chapter_number": 3, 
+                        "title": "The Alpha's Decree", 
+                        "goals": "Lyra is brought to the Obsidian pack camp. Build direct conflict with Selene, who fears Lyra's arrival, and Joren, who harbors hidden greed. Kaelen declares her safety.", 
+                        "cliffhanger_focus": "Selene whispering a warning to Lyra about Kaelen's dark ancestry."
+                    },
+                    {
+                        "chapter_number": 4, 
+                        "title": "Fated Whispers", 
+                        "goals": "Kaelen reveals the ancient fated hybrid prophecy and pack secrets to Lyra. Progress fated chemistry between them while Joren plots in the dark.", 
+                        "cliffhanger_focus": "Lyra overhearing Joren arranging a rogue border assault."
+                    },
+                    {
+                        "chapter_number": 5, 
+                        "title": "Obsidian Power Unleashed", 
+                        "goals": "Joren attempts to steal the ancient Obsidian Amulet and frame Lyra. Lyra intervenes, unexpectedly triggering her own hidden hybrid moon powers to stop him.", 
+                        "cliffhanger_focus": "A massive howl echoing from the borders as rogue forces launch an assault."
+                    }
                 ]
             })
         else:
@@ -288,13 +318,17 @@ def generate_comprehensive_plot_bible(title, character_bible, style_guide, chapt
     system_prompt = (
         "You are an Elite Senior Publishing Director specializing in commercial web novel serialization. "
         "Your task is to compile a massive, deeply detailed, 2000-word Plot Bible and Comprehensive Story Narrative "
-        "based on the first 5 chapters provided. Your response must be extremely thorough, formatted in beautiful "
+        "based on the provided drafted chapters. Your response must be extremely thorough, formatted in beautiful "
         "Markdown, and divided into the following clear sections:\n\n"
         "1. EXECUTIVE STORY OVERVIEW & METRICS\n"
-        "2. CHAPTER-BY-CHAPTER DEEP DIVE SYNOPIS (Chapters 1-5 detailed breakdowns)\n"
+        "2. OVERALL STORY NARRATIVE SUMMARY (A comprehensive, cohesive summary of the overall story arc that distills "
+        "the macro narrative trajectory and core conflicts. Do NOT write chapter-by-chapter breakdowns or chapter summaries; "
+        "instead, provide a single, unified, high-level summary of the entire novel's main plotline.)\n"
         "3. THE NOVEL CORE LORE BIBLE (The Obsidian Amulet, The Alpha's Shadow sigil, Prophecy mechanics, Ghost Wolves ancestry)\n"
         "4. CHARACTER RELATIONSHIP MATRIX (Maya & Kael's fated chemistry evolution, Joren's path to betrayal, Selene's motives)\n"
-        "5. SEASON 2 & FUTURE ARC ROADMAP (A structured projection of Chapters 6-20, main conflicts, and the looming Obsidian Crown climax)\n\n"
+        "5. STORY PROGRESSION & PROJECTED ENDING (A heavy, detailed projection into how the story is to progress through "
+        "future arcs, fated bond evolutions, key plot turning points, the definitive path to resolution, and exactly "
+        "how the story is projected to end in a high-tension fated climax.)\n\n"
         "Write with highly professional literary authority, leaving no stone unturned. Make sure the output is extensive, reaching a high word count of approximately 2000 words, detailed, and completely immersive."
     )
     
@@ -341,12 +375,6 @@ def generate_character_bible(title, synopsis, chapters_list):
         # Verify it is valid JSON
         json.loads(response)
         return response
-    except:
-        # Return a fallback JSON structure based on the outline characters
-        fallback = {
-            "female_lead": {"name": "Maya", "age": 22, "backstory": "Human with secret Moon-born lineage, fated bearer of the Shadow.", "desires": "To control her wolf within and protect Kael."},
-            "male_lead": {"name": "Kael", "age": 24, "backstory": "Alpha of the Ravenclaw Pack, bound to the ancient fated prophecy.", "desires": "To protect Maya and lead his pack safely."},
-            "rival_alpha": {"name": "Selene", "age": 26, "backstory": "Silver-maned Queen of the rival pack who seeks the Obsidian Amulet.", "desires": "To tear the Moon's Shadow apart and rule both packs."},
-            "supporting_ally": {"name": "Joren", "age": 25, "backstory": "Second-in-command of the Ravenclaw Pack who harbors secret ambitions.", "desires": "To seize the Shadow's power by betraying Kael."}
-        }
-        return json.dumps(fallback)
+    except Exception as e:
+        print(f"Failed to parse character bible JSON. Raw LLM response: {response}")
+        raise ValueError(f"Character Bible JSON parsing failed: {e}. Raw response: {response}")
