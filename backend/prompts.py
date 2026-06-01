@@ -27,134 +27,186 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
     Standard request caller for Azure OpenAI / OpenAI serverless endpoints. Supports multimodal image payloads.
     Allows dynamic endpoint, key, and model overrides to support dual-model workflows.
     Supports either a base64 encoded string or a direct public http/https image URL.
+    Implements a resilient multi-model routing & fallback waterfall prioritizing OpenRouter elite models
+    (Grok 4.3, DeepSeek-R1, Gemini 2.5 Flash) and automatically falling back to Azure OpenAI systems.
     """
-    headers = {
-        "Content-Type": "application/json",
-    }
-    
-    # Use overrides if provided, else fall back to standard settings
-    endpoint_url = (endpoint_url or AZURE_OPENAI_ENDPOINT).strip()
-    api_key = api_key or AZURE_OPENAI_KEY
-    model_name = model_name or API_MODEL
-    
-    # Check if this is an Azure AI Studio serverless (MaaS) endpoint
-    if "services.ai.azure.com" in endpoint_url or "inference.ai.azure.com" in endpoint_url:
-        from urllib.parse import urlparse
-        base_url = endpoint_url.split("?")[0]
-        parsed = urlparse(base_url)
-        endpoint_url = f"{parsed.scheme}://{parsed.netloc}/models/chat/completions"
-        
-        if "?" not in endpoint_url:
-            endpoint_url += "?api-version=2024-05-01-preview"
-            
-        # MaaS endpoints use standard Authorization Bearer header
-        headers["Authorization"] = f"Bearer {api_key}"
-    else:
-        # Traditional Azure OpenAI or OpenAI keys
-        if endpoint_url and not endpoint_url.endswith("/chat/completions") and not endpoint_url.endswith("/completions"):
-            endpoint_url = endpoint_url.rstrip("/") + "/chat/completions"
-            
-        if "openai.azure.com" in endpoint_url or "azure" in endpoint_url.lower():
-            headers["api-key"] = api_key
-        else:
-            headers["Authorization"] = f"Bearer {api_key}"
- 
-    # Prepare message payload
-    user_content = user_prompt
-    if image_base64:
-        # Support either direct image URL (e.g. public http/https link) or raw base64 data URI
-        if image_base64.startswith("http://") or image_base64.startswith("https://"):
-            image_url = image_base64
-        else:
-            image_url = f"data:image/jpeg;base64,{image_base64}"
-            
-        user_content = [
-            {"type": "text", "text": user_prompt},
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": image_url
-                }
-            }
-        ]
- 
-    # Force temperature=0.0 for OCR to ensure high-fidelity literal translation, else use 0.7 for creative writing
-    actual_temp = temperature if temperature is not None else (0.0 if image_base64 else 0.7)
- 
-    payload = {
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ],
-        "temperature": actual_temp,
-        "max_tokens": 4000
-    }
-    
-    # Inject model name if provided or required
-    if model_name:
-        payload["model"] = model_name
-    elif "api.openai.com" in endpoint_url or "services.ai.azure.com" in endpoint_url or "inference.ai.azure.com" in endpoint_url:
-        payload["model"] = "gpt-4o-mini"
-        
-    # B1s / Azure Serverless endpoints and custom gpt-oss-120b models often do not support json_object mode.
-    # We bypass response_format for these targets to ensure they return standard text completions.
-    if json_mode and model_name != "gpt-oss-120b" and "cognitiveservices.azure.com" not in endpoint_url:
-        payload["response_format"] = {"type": "json_object"}
- 
     import time
-    max_retries = 5
-    retry_delay = 2
     
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(endpoint_url, headers=headers, json=payload, timeout=120)
-            if response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                wait_sec = float(retry_after) if (retry_after and retry_after.replace('.', '', 1).isdigit()) else retry_delay
-                print(f"[LLM 429] Rate limited. Retrying attempt {attempt+1}/{max_retries} after waiting {wait_sec}s...")
-                time.sleep(wait_sec)
-                retry_delay *= 2
-                continue
+    # 1. Build the waterfall sequence of endpoints to try in order: (url, key, model, source_type)
+    waterfall = []
+    
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+    
+    # If the user explicitly provided overrides via function arguments, respect them as first priority
+    if endpoint_url or api_key or model_name:
+        resolved_endpoint = (endpoint_url or AZURE_OPENAI_ENDPOINT).strip()
+        resolved_key = api_key or AZURE_OPENAI_KEY
+        resolved_model = model_name or API_MODEL
+        waterfall.append((resolved_endpoint, resolved_key, resolved_model, "standard"))
+    
+    # If OpenRouter is configured in env, append the optimized multi-model stack
+    if openrouter_key:
+        or_endpoint = "https://openrouter.ai/api/v1/chat/completions"
+        if image_base64 or model_name == "Phi-4-Vision" or model_name == OCR_API_MODEL:
+            # Vision / OCR Tasks: Gemini 2.5 Flash is the absolute primary
+            waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash", "openrouter"))
+            waterfall.append((or_endpoint, openrouter_key, "google/gemini-1.5-flash", "openrouter"))
+        elif json_mode:
+            # Logic & Planning Tasks: DeepSeek-R1 is the absolute primary for outlines / bibles
+            waterfall.append((or_endpoint, openrouter_key, "deepseek/deepseek-r1", "openrouter"))
+            waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
+        else:
+            # Narrative & Prose Tasks: Grok 4.3 is the absolute primary
+            waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
+            waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash", "openrouter"))
             
-            response.raise_for_status()
-            result = response.json()
-            if "choices" in result and len(result["choices"]) > 0:
-                first_choice = result["choices"][0]
-                message = first_choice.get("message", {})
+    # Always ensure the original Azure system models are appended as the final fallback
+    azure_endpoint = AZURE_OPENAI_ENDPOINT.strip() if AZURE_OPENAI_ENDPOINT else ""
+    azure_key = AZURE_OPENAI_KEY
+    azure_model = API_MODEL
+    
+    # Vision tasks have their own dedicated Azure OCR fallback variables
+    if image_base64 or model_name == "Phi-4-Vision" or model_name == OCR_API_MODEL:
+        azure_endpoint = OCR_API_ENDPOINT.strip() if OCR_API_ENDPOINT else ""
+        azure_key = OCR_API_KEY
+        azure_model = OCR_API_MODEL
+        
+    # Avoid duplicate identical configurations
+    if not (endpoint_url or api_key or model_name):
+        waterfall.append((azure_endpoint, azure_key, azure_model, "standard"))
+        
+    last_exception = None
+    
+    # 2. Iterate through the waterfall to execute the request successfully
+    for target_endpoint, target_key, target_model, source_type in waterfall:
+        print(f"[LLM Router] Attempting call to model: {target_model} via {source_type}...")
+        
+        headers = {
+            "Content-Type": "application/json",
+        }
+        
+        # Configure endpoint url for API format
+        current_endpoint = target_endpoint
+        if source_type == "openrouter":
+            headers["Authorization"] = f"Bearer {target_key}"
+            headers["HTTP-Referer"] = "https://luna-writing-api-69542.azurewebsites.net"
+            headers["X-Title"] = "Luna Writing Studio"
+        else:
+            # Check if this is an Azure AI Studio serverless (MaaS) endpoint
+            if "services.ai.azure.com" in current_endpoint or "inference.ai.azure.com" in current_endpoint:
+                from urllib.parse import urlparse
+                base_url = current_endpoint.split("?")[0]
+                parsed = urlparse(base_url)
+                current_endpoint = f"{parsed.scheme}://{parsed.netloc}/models/chat/completions"
+                if "?" not in current_endpoint:
+                    current_endpoint += "?api-version=2024-05-01-preview"
+                headers["Authorization"] = f"Bearer {target_key}"
+            else:
+                # Traditional Azure OpenAI or OpenAI keys
+                if current_endpoint and not current_endpoint.endswith("/chat/completions") and not current_endpoint.endswith("/completions"):
+                    current_endpoint = current_endpoint.rstrip("/") + "/chat/completions"
+                if "openai.azure.com" in current_endpoint or "azure" in current_endpoint.lower():
+                    headers["api-key"] = target_key
+                else:
+                    headers["Authorization"] = f"Bearer {target_key}"
+
+        # Prepare message payload
+        user_content = user_prompt
+        if image_base64:
+            # Support either direct image URL (e.g. public http/https link) or raw base64 data URI
+            if image_base64.startswith("http://") or image_base64.startswith("https://"):
+                image_url = image_base64
+            else:
+                image_url = f"data:image/jpeg;base64,{image_base64}"
                 
-                # Gracefully handle Azure Content Safety filters
-                if first_choice.get("finish_reason") == "content_filter":
-                    raise ValueError("The narrative text or screenshot was blocked by Azure OpenAI Content Safety filters. Please try another segment or screenshot.")
+            user_content = [
+                {"type": "text", "text": user_prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image_url
+                    }
+                }
+            ]
+
+        # Force temperature=0.0 for OCR to ensure high-fidelity literal translation, else use 0.7 for creative writing
+        actual_temp = temperature if temperature is not None else (0.0 if image_base64 else 0.7)
+
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            "temperature": actual_temp,
+            "max_tokens": 4000
+        }
+        
+        # Inject model name
+        payload["model"] = target_model
+        
+        # B1s / Azure Serverless endpoints, custom gpt-oss-120b, and reasoning models like DeepSeek-R1 do not support json_object mode.
+        if json_mode and target_model != "gpt-oss-120b" and "deepseek-r1" not in target_model.lower() and "cognitiveservices.azure.com" not in current_endpoint:
+            payload["response_format"] = {"type": "json_object"}
+
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(current_endpoint, headers=headers, json=payload, timeout=120)
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    wait_sec = float(retry_after) if (retry_after and retry_after.replace('.', '', 1).isdigit()) else retry_delay
+                    print(f"[LLM 429] Rate limited on {target_model}. Retrying attempt {attempt+1}/{max_retries} after {wait_sec}s...")
+                    time.sleep(wait_sec)
+                    retry_delay *= 2
+                    continue
                 
-                # Check for direct model refusal
-                if "refusal" in message and message["refusal"]:
-                    raise ValueError(f"Azure model refused request: {message['refusal']}")
+                response.raise_for_status()
+                result = response.json()
+                if "choices" in result and len(result["choices"]) > 0:
+                    first_choice = result["choices"][0]
+                    message = first_choice.get("message", {})
                     
-                if "content" in message:
-                    return message["content"]
+                    # Gracefully handle Content Safety filters
+                    if first_choice.get("finish_reason") == "content_filter":
+                        raise ValueError("The narrative text or screenshot was blocked by Content Safety filters. Please try another segment.")
+                    
+                    # Check for direct model refusal
+                    if "refusal" in message and message["refusal"]:
+                        raise ValueError(f"Model refused request: {message['refusal']}")
+                        
+                    if "content" in message:
+                        return message["content"]
+                    
+                raise ValueError("LLM responded with an empty or unexpected completion format.")
+            except Exception as e:
+                is_429 = False
+                if hasattr(e, "response") and e.response is not None:
+                    if e.response.status_code == 429:
+                        is_429 = True
                 
-            raise ValueError("LLM responded with an empty or unexpected completion format (missing choices or content).")
-        except Exception as e:
-            # Check if this exception has a 429 status code
-            is_429 = False
-            if hasattr(e, "response") and e.response is not None:
-                if e.response.status_code == 429:
-                    is_429 = True
-            
-            if is_429:
-                wait_sec = retry_delay
-                print(f"[LLM 429] Rate limited (exception). Retrying attempt {attempt+1}/{max_retries} after waiting {wait_sec}s...")
-                time.sleep(wait_sec)
-                retry_delay *= 2
-                continue
-                
-            if attempt == max_retries - 1:
-                print(f"LLM API Call failed on final attempt: {e}")
-                raise e
-            
-            print(f"LLM API Call failed on attempt {attempt+1}: {e}. Retrying after {retry_delay}s...")
-            time.sleep(retry_delay)
-            retry_delay *= 2
+                if is_429:
+                    wait_sec = retry_delay
+                    print(f"[LLM 429] Rate limited (exception) on {target_model}. Retrying after {wait_sec}s...")
+                    time.sleep(wait_sec)
+                    retry_delay *= 2
+                    continue
+                    
+                if attempt == max_retries - 1:
+                    print(f"[LLM Router Error] Attempt {attempt+1} failed on {target_model}: {e}")
+                    last_exception = e
+                else:
+                    print(f"API Call failed on {target_model} (attempt {attempt+1}): {e}. Retrying after {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+        
+        print(f"[LLM Router Fallback] {target_model} failed. Cascade triggering next fallback model...")
+        
+    # If all models in the waterfall fail, raise the last encountered exception
+    if last_exception:
+        raise last_exception
+    raise ValueError("All models in the LLM router routing waterfall failed to return a response.")
  
 def extract_text_from_image(image_base64):
     """
