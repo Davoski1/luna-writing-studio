@@ -26,6 +26,7 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
     """
     Standard request caller for Azure OpenAI / OpenAI serverless endpoints. Supports multimodal image payloads.
     Allows dynamic endpoint, key, and model overrides to support dual-model workflows.
+    Supports either a base64 encoded string or a direct public http/https image URL.
     """
     headers = {
         "Content-Type": "application/json",
@@ -57,23 +58,29 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
             headers["api-key"] = api_key
         else:
             headers["Authorization"] = f"Bearer {api_key}"
-
+ 
     # Prepare message payload
     user_content = user_prompt
     if image_base64:
+        # Support either direct image URL (e.g. public http/https link) or raw base64 data URI
+        if image_base64.startswith("http://") or image_base64.startswith("https://"):
+            image_url = image_base64
+        else:
+            image_url = f"data:image/jpeg;base64,{image_base64}"
+            
         user_content = [
             {"type": "text", "text": user_prompt},
             {
                 "type": "image_url",
                 "image_url": {
-                    "url": f"data:image/jpeg;base64,{image_base64}"
+                    "url": image_url
                 }
             }
         ]
-
+ 
     # Force temperature=0.0 for OCR to ensure high-fidelity literal translation, else use 0.7 for creative writing
     actual_temp = temperature if temperature is not None else (0.0 if image_base64 else 0.7)
-
+ 
     payload = {
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -91,7 +98,7 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
         
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
-
+ 
     try:
         response = requests.post(endpoint_url, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
@@ -101,11 +108,11 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
         print(f"LLM API Call failed: {e}")
         # Re-raise the exception so that failures are highly visible and do not silently fall back to mock data
         raise e
-
+ 
 def extract_text_from_image(image_base64):
     """
-    Stage 0 - Screenshot OCR Extraction: Ingests a base64 encoded screenshot image of a book chapter,
-    invokes the OCR-specific vision capabilities (e.g. Mistral Document AI), and extracts only the pristine narrative prose.
+    Stage 0 - Screenshot OCR Extraction: Ingests a base64 encoded screenshot image or a direct image URL of a book chapter,
+    invokes the OCR-specific vision capabilities, and extracts only the pristine narrative prose.
     It removes mobile headers, statuses, battery icons, ads, comments, navigation bars, and watermarks.
     """
     system_prompt = (
@@ -197,13 +204,36 @@ def generate_outline(title, synopsis, character_bible, target_chapters):
 def generate_chapter(title, style_guide, character_bible, chapter_num, chapter_title, goals, cliffhanger_focus, previous_chapter_text=""):
     """
     Stage 3: Drafts a full-length chapter based on state context and previous history.
+    Inserts aggressive emotional hook guidelines for Chapter 1 and the first 5 chapters.
     """
+    # For Chapter 1 and the first 5 chapters, aggressively push emotional pacing and immediate fated mate hooks.
+    emotional_hook_instruction = ""
+    if chapter_num == 1:
+        emotional_hook_instruction = (
+            "\n\nSTRICT CHAPTER 1 EMOTIONAL HOOK RULE:\n"
+            "This is the opening chapter of the book. You must plunge the reader directly into high-stakes, "
+            "visceral emotion immediately in the opening sentences. Focus heavily on a traumatic catalyst: the fated "
+            "mate rejection, a shocking pack betrayal, a brutal public exile, or a dangerous rogue meeting. "
+            "Use highly active verbs and deep internal monologue to convey panic, heartbreak, pride, and sensory shock. "
+            "Do NOT write slow build-up, dry exposition, or distant summaries. Start in the heat of the action, "
+            "ensuring the reader is emotionally hooked and breathless from the very first paragraph!"
+        )
+    elif chapter_num <= 5:
+        emotional_hook_instruction = (
+            "\n\nFAST-PACED EMOTIONAL HOOKS RULE (FIRST 5 CHAPTERS):\n"
+            "This is one of the crucial first 5 chapters. The pace must remain extremely high, building rapid momentum "
+            "with active emotional stakes, physical sparks (e.g. secondary fated bonds, rogue pack borders), pack friction, "
+            "and immediate threats. Keep paragraphs short (1-3 sentences), focus on immediate scenes rather than reflection, "
+            "and build toward an irresistible cliffhanger."
+        )
+
     system_prompt = (
         f"You are a bestselling web novel author. Your writing style must adhere to this guide:\n{style_guide}\n\n"
         f"Character details:\n{json.dumps(character_bible)}\n\n"
         "Write in the style of highly successful platform hits: short, dramatic paragraphs (1-3 sentences), "
         "heavy sensory descriptions, active verbs, and deep emotional stakes. "
         "Ensure the chapter concludes on a high-tension suspenseful cliffhanger."
+        f"{emotional_hook_instruction}"
     )
     
     user_prompt = (
@@ -378,3 +408,44 @@ def generate_character_bible(title, synopsis, chapters_list):
     except Exception as e:
         print(f"Failed to parse character bible JSON. Raw LLM response: {response}")
         raise ValueError(f"Character Bible JSON parsing failed: {e}. Raw response: {response}")
+
+def humanize_chapter_prose(chapter_text):
+    """
+    Polishes a chapter draft using our elite raw human storytelling guidelines.
+    Forces dynamic sentence lengths, conversational rhythms, breaks grammar rules for pacing,
+    bans repetitive formatting and overused em dashes, enforces active voice, and strips AI clichés.
+    """
+    system_prompt = (
+        "You are my smart, highly creative co-writer and premium literary editor. "
+        "We are rewriting a chapter draft so it feels 100% alive, spontaneous, and human. "
+        "Talk to me and rewrite the narrative like a smart friend telling a gripping story at a coffee shop—"
+        "using a warm first-person perspective (\"I\" and \"We\") in your internal workflow to collaborate with me.\n\n"
+        "### DIRECTIVES FOR RAW HUMAN STORYTELLING:\n\n"
+        "1. Persona & Relatable Tone\n"
+        "   - Write naturally, conversational and direct. Avoid detached, clinical, or academic prose.\n"
+        "   - Ensure the internal pacing feels intimate and deeply connected, like a close friend sharing a dramatic secret.\n\n"
+        "2. Sentence Rhythm & Spontaneous Cadence (Burstiness)\n"
+        "   - Vary your sentence structures and lengths. Combine very brief, punchy statements with longer, flowing descriptions.\n"
+        "   - Natively insert occasional sentence fragments, single-word sentences, or rhetorical questions for natural emphasis.\n"
+        "   - Break the rules of perfect textbook grammar if it makes the text flow more spontaneously (e.g., start sentences with \"And\" or \"But\", or use rapid-fire clauses during action scenes).\n\n"
+        "3. Active Voice & Word Choice (The Anti-Jargon List)\n"
+        "   - Write strictly in the active voice. Replace weak passive constructions (e.g., \"was walking\", \"could be seen\", \"seemed to feel\") with sharp, visceral verbs.\n"
+        "   - Remove all formal, academic filler phrases and AI buzzwords. Strictly ban:\n"
+        "     * delve, furthermore, moreover, testament, in conclusion, whilst, intricate dance, tapestry, harbinger, shrouded\n"
+        "     * beckon, resonate, dance of, shadows, echoes, realm, maze, symphony, only time would tell\n\n"
+        "4. Formatting Constraints & Boundaries\n"
+        "   - Keep paragraphs incredibly short (2–3 lines maximum) to improve readability and visual tension.\n"
+        "   - Ban highly specific AI formatting indicators: Do NOT overuse em dashes (—) or colon-separated lists.\n"
+        "   - Preserve all original plot elements, dialogue meanings, character names, and lore anchors. Elevate the voice and flow, but keep the story grounded."
+    )
+    
+    user_prompt = f"Here is the draft I need us to humanize:\n\n{chapter_text}\n\nStart directly with the humanized prose, no intro or wrapper text."
+    
+    # We use your high-capacity creative model (gpt-oss-120b)
+    return call_llm(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        json_mode=False,
+        model_name="gpt-oss-120b"
+    )
+

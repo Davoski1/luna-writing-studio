@@ -466,3 +466,43 @@ def generate_characters(book_id: str):
     conn.close()
     
     return json.loads(char_bible_content)
+
+@app.post("/api/books/{book_id}/chapters/{chapter_number}/humanize")
+def humanize_chapter(book_id: str, chapter_number: int):
+    conn = db.get_db_connection()
+    # 1. Fetch the chapter content from the database
+    chapter = db.execute_query(
+        conn, 
+        "SELECT id, content FROM chapters WHERE book_id = ? AND chapter_number = ?", 
+        (book_id, chapter_number), 
+        fetch_one=True
+    )
+    if not chapter:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Chapter not found in this book.")
+        
+    # 2. Invoke the humanizer function
+    print(f"[API] Humanizing Chapter {chapter_number} for book {book_id}...")
+    try:
+        humanized_content = prompts.humanize_chapter_prose(chapter["content"])
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Humanizer failed: {e}")
+        
+    # 3. Update the database with the humanized prose and new word count
+    word_count = len(humanized_content.split())
+    db.execute_query(
+        conn, 
+        "UPDATE chapters SET content = ?, word_count = ? WHERE id = ?", 
+        (humanized_content, word_count, chapter["id"]), 
+        commit=True
+    )
+    conn.close()
+    
+    return {
+        "status": "humanized", 
+        "chapter_number": chapter_number, 
+        "content": humanized_content, 
+        "word_count": word_count
+    }
+
