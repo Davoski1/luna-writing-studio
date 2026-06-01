@@ -96,7 +96,9 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
     elif "api.openai.com" in endpoint_url or "services.ai.azure.com" in endpoint_url or "inference.ai.azure.com" in endpoint_url:
         payload["model"] = "gpt-4o-mini"
         
-    if json_mode:
+    # B1s / Azure Serverless endpoints and custom gpt-oss-120b models often do not support json_object mode.
+    # We bypass response_format for these targets to ensure they return standard text completions.
+    if json_mode and model_name != "gpt-oss-120b" and "cognitiveservices.azure.com" not in endpoint_url:
         payload["response_format"] = {"type": "json_object"}
  
     import time
@@ -184,6 +186,19 @@ def extract_text_from_image(image_base64):
         temperature=0.0
     )
 
+def _clean_json_text(text):
+    if not text:
+        return ""
+    text = text.strip()
+    # Strip markdown block wrappers if present
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
 def deconstruct_and_adapt(reference_text):
     """
     Stage 1: Analyzes the reference text to pull out structural DNA and 
@@ -210,7 +225,7 @@ def deconstruct_and_adapt(reference_text):
     user_prompt = f"Deconstruct and generate a unique original adaptation of this input:\n\n{reference_text}"
     response_text = call_llm(system_prompt, user_prompt, json_mode=True)
     try:
-        return json.loads(response_text)
+        return json.loads(_clean_json_text(response_text))
     except Exception as e:
         print(f"Failed to parse adaptation JSON. Raw LLM response: {response_text}")
         raise ValueError(f"Adaptation JSON parsing failed: {e}. Raw response: {response_text}")
@@ -241,7 +256,7 @@ def generate_outline(title, synopsis, character_bible, target_chapters):
     
     response_text = call_llm(system_prompt, user_prompt, json_mode=True)
     try:
-        return json.loads(response_text).get("outline", [])
+        return json.loads(_clean_json_text(response_text)).get("outline", [])
     except Exception as e:
         print(f"Failed to parse outline JSON. Raw LLM response: {response_text}")
         raise ValueError(f"Outline JSON parsing failed: {e}. Raw response: {response_text}")
@@ -471,9 +486,10 @@ def generate_character_bible(title, synopsis, chapters_list):
     
     response = call_llm(system_prompt, user_prompt, json_mode=True)
     try:
-        # Verify it is valid JSON
-        json.loads(response)
-        return response
+        # Verify and clean it is valid JSON
+        cleaned = _clean_json_text(response)
+        json.loads(cleaned)
+        return cleaned
     except Exception as e:
         print(f"Failed to parse character bible JSON. Raw LLM response: {response}")
         raise ValueError(f"Character Bible JSON parsing failed: {e}. Raw response: {response}")
