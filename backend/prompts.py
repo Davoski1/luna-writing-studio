@@ -64,6 +64,13 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
     azure_endpoint = AZURE_OPENAI_ENDPOINT.strip() if AZURE_OPENAI_ENDPOINT else ""
     azure_key = AZURE_OPENAI_KEY
     azure_model = API_MODEL
+
+    # If the user has configured direct xAI API credentials to use their free console credits,
+    # and this is a creative prose/drafting task (not planning or vision), prioritize direct xAI Grok at the absolute top!
+    is_xai_configured = "api.x.ai" in azure_endpoint.lower()
+    if is_xai_configured and not json_mode and not image_base64 and not (endpoint_url or api_key or model_name):
+        xai_model = azure_model if azure_model != "gpt-oss-120b" else "grok-2"
+        waterfall.insert(0, (azure_endpoint, azure_key, xai_model, "standard"))
     
     # Vision tasks have their own dedicated Azure OCR fallback variables
     if image_base64 or model_name == "Phi-4-Vision" or model_name == OCR_API_MODEL:
