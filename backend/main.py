@@ -102,19 +102,20 @@ def background_writing_pipeline(book_id: str, reference_text: str, reference_url
         genre = proposal.get("genre", "Werewolf Romance")
         style_guide = proposal.get("style_guide", "Short dramatic paragraphs.")
         character_bible = json.dumps(proposal.get("character_bible", {}))
+        structural_outline = proposal.get("structural_outline", "")
 
         # Save proposal back to books table
         conn = db.get_db_connection()
         db.execute_query(conn, """
             UPDATE books 
-            SET title = ?, synopsis = ?, genre = ?, style_guide = ?, character_bible = ?, status = 'planning'
+            SET title = ?, synopsis = ?, genre = ?, style_guide = ?, character_bible = ?, structural_outline = ?, status = 'planning'
             WHERE id = ?
-        """, (title, synopsis, genre, style_guide, character_bible, book_id), commit=True)
+        """, (title, synopsis, genre, style_guide, character_bible, structural_outline, book_id), commit=True)
         conn.close()
         
         # Stage 2: Generate Outline
         print(f"[Worker] Designing outline for book {book_id}...")
-        outline = prompts.generate_outline(title, synopsis, proposal.get("character_bible", {}), target_chapters)
+        outline = prompts.generate_outline(title, synopsis, proposal.get("character_bible", {}), target_chapters, structural_outline)
         
         conn = db.get_db_connection()
         for ch in outline:
@@ -187,6 +188,7 @@ def generate_chapter_sync(book_id: str):
     print(f"[Worker] Drafting Chapter {next_outline['chapter_number']} for book {book_id}...")
     char_bible = json.loads(book["character_bible"]) if book["character_bible"] else {}
     style_example = dict(book).get("style_example_chapter")
+    structural_out = dict(book).get("structural_outline")
     chapter_content = prompts.generate_chapter(
         title=book["title"],
         style_guide=book["style_guide"],
@@ -196,7 +198,8 @@ def generate_chapter_sync(book_id: str):
         goals=next_outline["goals"],
         cliffhanger_focus=next_outline["cliffhanger_focus"],
         previous_chapter_text=previous_chapter_text,
-        style_example_chapter=style_example
+        style_example_chapter=style_example,
+        structural_outline=structural_out
     )
 
     # 5. Save drafted chapter to DB and mark outline status

@@ -76,6 +76,7 @@ def init_db():
         style_guide TEXT,
         character_bible TEXT,
         plot_bible TEXT,
+        structural_outline TEXT,
         status VARCHAR(50) DEFAULT 'planning',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -144,6 +145,20 @@ def init_db():
         cursor = conn.cursor()
         try:
             cursor.execute("ALTER TABLE books ADD COLUMN style_example_chapter TEXT;")
+            conn.commit()
+            cursor = conn.cursor()
+        except Exception:
+            conn.rollback()
+            cursor = conn.cursor()
+
+    # 3. Check & Add structural_outline
+    try:
+        cursor.execute("SELECT structural_outline FROM books LIMIT 1;")
+    except Exception:
+        conn.rollback()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("ALTER TABLE books ADD COLUMN structural_outline TEXT;")
             conn.commit()
             cursor = conn.cursor()
         except Exception:
