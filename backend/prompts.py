@@ -360,8 +360,11 @@ def generate_chapter(title, style_guide, character_bible, chapter_num, chapter_t
     system_prompt = (
         f"You are a bestselling web novel author. Your writing style must adhere to this guide:\n{style_guide}\n\n"
         f"Character details:\n{json.dumps(character_bible)}\n\n"
-        "Write in the style of highly successful platform hits: short, dramatic paragraphs (1-3 sentences), "
-        "heavy sensory descriptions, active verbs, and deep emotional stakes. "
+        "STRICT PROSE STYLE & GRAMMAR RULES:\n"
+        "1. Write in a raw, modern, casual voice. Use conversational terms and realistic modern slang. Avoid overly formal or dictionary-heavy vocabulary.\n"
+        "2. Do NOT use overly complex, rigid, or perfect grammar. Mirror natural thought patterns: allow fragments, conversational contractions, and loose sentence structures that reflect a real person's internal voice.\n"
+        "3. Maintain intense underlying tension and a poetic, atmospheric feel. Create poetry through rhythm, pauses, short punchy lines (1-3 sentences per paragraph), and visceral sensory details (smells, temperatures, goosebumps, racing heartbeats) rather than big fancy words or loud melodrama.\n"
+        "4. Keep the drama grounded. Let the characters react with raw, quiet, realistic shock or quiet passion, rather than theatrical sighs, screaming, or grand monologues.\n"
         "Ensure the chapter concludes on a high-tension suspenseful cliffhanger."
         f"{emotional_hook_instruction}"
     )
@@ -403,6 +406,7 @@ def review_and_polish_chapters(title, character_bible, style_guide, chapters_lis
         "1. Plot inconsistencies (e.g., character actions contradict their backstory or secrets).\n"
         "2. Character detail changes (e.g., mismatched eye colors, names, or physical traits).\n"
         "3. Pacing and CLIFFHANGER optimization: Make sure each chapter ending leaves the reader highly suspenseful.\n"
+        "4. Tone Check: Strip away overly theatrical/flowery language or big fancy words. Ensure the dialogue is casual, the grammar is simple and conversational, and the scene retains raw poetic tension.\n"
         "Rewrite each chapter to be highly engaging, emotional, and consistent, while maintaining the short paragraph styling."
     )
     
@@ -412,8 +416,8 @@ def review_and_polish_chapters(title, character_bible, style_guide, chapters_lis
         draft_data += f"--- CHAPTER {ch['chapter_number']}: {ch['title']} ---\n{ch['content']}\n\n"
 
     user_prompt = (
-        "Review and rewrite the following drafted chapters to ensure perfect logical consistency "
-        "and elite emotional web-novel styling. Output the complete revised text, separating chapters clearly:\n\n"
+        "Review and rewrite the following drafted chapters to ensure perfect logical consistency, "
+        "casual modern dialogue, raw poetic tension, and elite emotional web-novel styling. Output the complete revised text, separating chapters clearly:\n\n"
         f"{draft_data}"
     )
     
