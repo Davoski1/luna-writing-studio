@@ -44,23 +44,34 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
         resolved_model = model_name or API_MODEL
         waterfall.append((resolved_endpoint, resolved_key, resolved_model, "standard"))
     
-    # If OpenRouter is configured in env, append the optimized multi-model stack
+    # If OpenRouter is configured in env, append Tier 1 (Paid OpenRouter) and Tier 2 (Free OpenRouter)
     if openrouter_key:
         or_endpoint = "https://openrouter.ai/api/v1/chat/completions"
         if image_base64 or model_name == "Phi-4-Vision" or model_name == OCR_API_MODEL:
-            # Vision / OCR Tasks: Gemini 2.5 Flash is the absolute primary
+            # Vision / OCR Tasks:
+            # Tier 1: Paid Gemini 2.5 Flash
             waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash", "openrouter"))
-            waterfall.append((or_endpoint, openrouter_key, "google/gemini-1.5-flash", "openrouter"))
+            # Tier 2: Free Gemini 2.5 Flash
+            waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash:free", "openrouter"))
+            waterfall.append((or_endpoint, openrouter_key, "google/gemini-1.5-flash:free", "openrouter"))
         elif json_mode:
-            # Logic & Planning Tasks: DeepSeek-R1 is the absolute primary for outlines / bibles
+            # Logic & Planning Tasks:
+            # Tier 1: Paid DeepSeek R1 & Grok 4.3
             waterfall.append((or_endpoint, openrouter_key, "deepseek/deepseek-r1", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
+            # Tier 2: Free DeepSeek R1 & Free Llama 3.3
+            waterfall.append((or_endpoint, openrouter_key, "deepseek/deepseek-r1:free", "openrouter"))
+            waterfall.append((or_endpoint, openrouter_key, "meta-llama/llama-3.3-70b-instruct:free", "openrouter"))
         else:
-            # Narrative & Prose Tasks: Grok 4.3 is the absolute primary
+            # Narrative & Prose Tasks:
+            # Tier 1: Paid Grok 4.3 & Paid Gemini 2.5 Flash
             waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash", "openrouter"))
+            # Tier 2: Free Llama 3.3 & Free Gemini 2.5 Flash
+            waterfall.append((or_endpoint, openrouter_key, "meta-llama/llama-3.3-70b-instruct:free", "openrouter"))
+            waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash:free", "openrouter"))
             
-    # Always ensure the original Azure system models are appended as the final fallback
+    # Always ensure the original Azure system models are appended as Tier 3 (Final Fallback)
     azure_endpoint = AZURE_OPENAI_ENDPOINT.strip() if AZURE_OPENAI_ENDPOINT else ""
     azure_key = AZURE_OPENAI_KEY
     azure_model = API_MODEL
