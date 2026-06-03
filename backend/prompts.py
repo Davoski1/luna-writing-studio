@@ -36,6 +36,9 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
     waterfall = []
     
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+    azure_endpoint = AZURE_OPENAI_ENDPOINT.strip() if AZURE_OPENAI_ENDPOINT else ""
+    azure_key = AZURE_OPENAI_KEY
+    azure_model = API_MODEL
     
     # If the user explicitly provided overrides via function arguments, respect them as first priority
     if endpoint_url or api_key or model_name:
@@ -44,58 +47,62 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
         resolved_model = model_name or API_MODEL
         waterfall.append((resolved_endpoint, resolved_key, resolved_model, "standard"))
     
-    # If OpenRouter is configured in env, append Tier 1 (Paid OpenRouter) and Tier 2 (Free OpenRouter)
+    # Determine the task type
+    is_vision = image_base64 or (model_name and ("vision" in model_name.lower() or "grok" in model_name.lower() or model_name == "Phi-4-Vision")) or model_name == OCR_API_MODEL
+    
+    # Tier 1 (Primary Model): Direct Azure endpoint configurations
+    if not (endpoint_url or api_key or model_name):
+        if is_vision:
+            # For OCR/Vision, Phi-4-Vision is first priority
+            phi_endpoint = AZURE_OPENAI_ENDPOINT.strip() if AZURE_OPENAI_ENDPOINT else ""
+            phi_key = AZURE_OPENAI_KEY
+            phi_model = "Phi-4-Vision"
+            if phi_endpoint:
+                waterfall.append((phi_endpoint, phi_key, phi_model, "standard"))
+        else:
+            # For Logic & Narrative, gpt-oss-120b is first priority
+            if azure_endpoint:
+                waterfall.append((azure_endpoint, azure_key, azure_model, "standard"))
+
+    # Tier 2 (OpenRouter Fallbacks):
     if openrouter_key:
         or_endpoint = "https://openrouter.ai/api/v1/chat/completions"
-        if image_base64 or model_name in ["Phi-4-Vision", "x-ai/grok-4.3", "x-ai/grok-4.20", "x-ai/grok-2-vision-1212", OCR_API_MODEL]:
-            # Vision / OCR Tasks:
-            # Tier 1: Paid Grok 4.3 / 4.20 & Paid Gemini 2.5 Flash
+        if is_vision:
+            # Vision / OCR Fallbacks:
             waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.20", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash", "openrouter"))
-            # Tier 2: Free / Low-cost fallback models
             waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash-lite", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "nvidia/nemotron-nano-12b-v2-vl:free", "openrouter"))
         elif json_mode:
-            # Logic & Planning Tasks:
-            # Tier 1: Paid DeepSeek R1 & Grok 4.3
+            # Logic / Planning Fallbacks:
             waterfall.append((or_endpoint, openrouter_key, "deepseek/deepseek-r1", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
-            # Tier 2: Free Llama 3.3
             waterfall.append((or_endpoint, openrouter_key, "meta-llama/llama-3.3-70b-instruct:free", "openrouter"))
         else:
-            # Narrative & Prose Tasks:
-            # Tier 1: Paid Grok 4.3 & Paid Gemini 2.5 Flash
+            # Narrative / Prose Fallbacks:
             waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash", "openrouter"))
-            # Tier 2: Free Llama 3.3 & Low-cost Gemini 2.5 Flash Lite
             waterfall.append((or_endpoint, openrouter_key, "meta-llama/llama-3.3-70b-instruct:free", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash-lite", "openrouter"))
-            
-    # Always ensure the original Azure system models are appended as Tier 3 (Final Fallback)
-    azure_endpoint = AZURE_OPENAI_ENDPOINT.strip() if AZURE_OPENAI_ENDPOINT else ""
-    azure_key = AZURE_OPENAI_KEY
-    azure_model = API_MODEL
- 
-    # If the user has configured direct xAI API credentials to use their free console credits,
-    # and this is a creative prose/drafting task (not planning or vision), prioritize direct xAI Grok at the absolute top!
-    is_xai_configured = "api.x.ai" in azure_endpoint.lower()
-    if is_xai_configured and not json_mode and not image_base64 and not (endpoint_url or api_key or model_name):
-        xai_model = azure_model if azure_model != "gpt-oss-120b" else "grok-2"
-        waterfall.insert(0, (azure_endpoint, azure_key, xai_model, "standard"))
-    
-    # Vision tasks have their own dedicated Azure OCR fallback variables
-    if image_base64 or model_name in ["Phi-4-Vision", "x-ai/grok-4.3", "x-ai/grok-4.20", "x-ai/grok-2-vision-1212", OCR_API_MODEL]:
-        azure_endpoint = OCR_API_ENDPOINT.strip() if OCR_API_ENDPOINT else ""
-        azure_key = OCR_API_KEY
-        azure_model = OCR_API_MODEL
-        
-    # Avoid duplicate identical configurations
+
+    # Tier 3 (Cross-Fallbacks / Duplicate Prevention):
+    # Ensure that if the primary Azure models fail (or if they weren't added), we still have standard variables as secondary fallbacks
     if not (endpoint_url or api_key or model_name):
-        waterfall.append((azure_endpoint, azure_key, azure_model, "standard"))
-        
-    # 1.5 Always append the Azure Phi-4-Vision model as the final fallback for vision tasks
-    if image_base64 or (model_name and ("vision" in model_name.lower() or "grok" in model_name.lower() or model_name == "Phi-4-Vision")):
+        if is_vision:
+            # In case Azure Phi-4-Vision failed or wasn't added, add OCR_API_ENDPOINT as fallback
+            ocr_endpoint = OCR_API_ENDPOINT.strip() if OCR_API_ENDPOINT else ""
+            ocr_key = OCR_API_KEY
+            ocr_model = OCR_API_MODEL
+            if ocr_endpoint and not any(w[0] == ocr_endpoint and w[2] == ocr_model for w in waterfall):
+                waterfall.append((ocr_endpoint, ocr_key, ocr_model, "standard"))
+        else:
+            # In case the primary azure_model failed, check if we had any other fallback or if we need to ensure azure_endpoint is appended
+            if azure_endpoint and not any(w[0] == azure_endpoint and w[2] == azure_model for w in waterfall):
+                waterfall.append((azure_endpoint, azure_key, azure_model, "standard"))
+
+    # Always ensure Phi-4-Vision is appended for vision tasks if not already present
+    if is_vision:
         phi_endpoint = AZURE_OPENAI_ENDPOINT.strip() if AZURE_OPENAI_ENDPOINT else ""
         phi_key = AZURE_OPENAI_KEY
         phi_model = "Phi-4-Vision"
