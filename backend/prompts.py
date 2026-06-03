@@ -61,8 +61,7 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
             # Tier 1: Paid DeepSeek R1 & Grok 4.3
             waterfall.append((or_endpoint, openrouter_key, "deepseek/deepseek-r1", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
-            # Tier 2: Free DeepSeek R1 & Free Llama 3.3
-            waterfall.append((or_endpoint, openrouter_key, "deepseek/deepseek-r1:free", "openrouter"))
+            # Tier 2: Free Llama 3.3
             waterfall.append((or_endpoint, openrouter_key, "meta-llama/llama-3.3-70b-instruct:free", "openrouter"))
         else:
             # Narrative & Prose Tasks:
@@ -95,6 +94,14 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
     if not (endpoint_url or api_key or model_name):
         waterfall.append((azure_endpoint, azure_key, azure_model, "standard"))
         
+    # 1.5 Always append the Azure Phi-4-Vision model as the final fallback for vision tasks
+    if image_base64 or (model_name and ("vision" in model_name.lower() or "grok" in model_name.lower() or model_name == "Phi-4-Vision")):
+        phi_endpoint = AZURE_OPENAI_ENDPOINT.strip() if AZURE_OPENAI_ENDPOINT else ""
+        phi_key = AZURE_OPENAI_KEY
+        phi_model = "Phi-4-Vision"
+        if phi_endpoint and not any(w[0] == phi_endpoint and w[2] == phi_model for w in waterfall):
+            waterfall.append((phi_endpoint, phi_key, phi_model, "standard"))
+            
     last_exception = None
     
     # 2. Iterate through the waterfall to execute the request successfully
