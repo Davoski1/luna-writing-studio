@@ -666,7 +666,7 @@ def get_fallback_mock_response(system_prompt, user_prompt, json_mode):
             "Could it be Magnus? Or someone far worse?"
         )
 
-def generate_comprehensive_plot_bible(title, character_bible, style_guide, chapters_list, plot_summary_example=None):
+def generate_comprehensive_plot_bible(title, genre, synopsis, character_bible, structural_outline, style_guide, chapters_list, plot_summary_example=None):
     """
     Takes the drafted chapters list and generates a massive, 2,000-word comprehensive
     novel blueprint, deep-dive plot synopsis, lore book, and future trajectory bible.
@@ -674,25 +674,25 @@ def generate_comprehensive_plot_bible(title, character_bible, style_guide, chapt
     system_prompt = (
         "You are an Elite Senior Publishing Director specializing in commercial web novel serialization. "
         "Your task is to compile a massive, deeply detailed, 2000-word Plot Bible and Comprehensive Story Narrative "
-        "based on the provided drafted chapters. Your response must be extremely thorough, formatted in beautiful "
-        "Markdown, and divided into the following clear sections:\n\n"
+        "based on the provided book metadata, character bible, structural outline, and drafted chapters. "
+        "Your response must be extremely thorough, formatted in beautiful Markdown, and divided into the following clear sections:\n\n"
         "1. EXECUTIVE STORY OVERVIEW & METRICS\n"
         "2. OVERALL STORY NARRATIVE SUMMARY (This section must be written as a continuous, cohesive narrative summary "
         "in a continuous essay format without nested markdown headers or subheadings. It must seamlessly map the entire story "
         "arc through 7 distinct serialized storytelling milestones:\n"
-        "   - Milestone 1: Status Quo & Catalyst (Introduction & fated rejection/tragedy)\n"
-        "   - Milestone 2: Inciting Incident (Initial encounter / crossing the border into danger)\n"
-        "   - Milestone 3: Rising Action & Obstacles (Pack friction, secondary bond chemistry, rivals)\n"
-        "   - Milestone 4: Midpoint/Shift (Lore/prophecy discovery or hybrid power trigger)\n"
-        "   - Milestone 5: The Crisis/Betrayal (Internal betrayal or framing plot)\n"
-        "   - Milestone 6: Climax/Resolution of the first major arc (Border assault & hybrid power outbreak)\n"
-        "   - Milestone 7: The Cliffhanger Hook for future arcs (Next arc seeding)\n"
+        "   - Milestone 1: Status Quo & Catalyst (Introduction, setup, and key status quo shattering event)\n"
+        "   - Milestone 2: Inciting Incident (Initial major catalyst / entering new situation or danger)\n"
+        "   - Milestone 3: Rising Action & Obstacles (Tension, rivals, close circle friction, secondary chemistry)\n"
+        "   - Milestone 4: Midpoint/Shift (Lore revelation, power awakening, or key plot twist shift)\n"
+        "   - Milestone 5: The Crisis/Betrayal (Internal betrayal, framing plot, or severe obstacle)\n"
+        "   - Milestone 6: Climax/Resolution of the first major arc (High stakes conflict outbreak & key resolution)\n"
+        "   - Milestone 7: The Cliffhanger Hook for future arcs (Seeding future hooks)\n"
         "Do NOT write separate chapter summaries; synthesize these milestones into one continuous, high-converting narrative essay.)\n"
-        "3. THE NOVEL CORE LORE BIBLE (The Obsidian Amulet, The Alpha's Shadow sigil, Prophecy mechanics, Ghost Wolves ancestry)\n"
-        "4. CHARACTER RELATIONSHIP MATRIX (Maya & Kael's fated chemistry evolution, Joren's path to betrayal, Selene's motives)\n"
+        "3. THE NOVEL CORE LORE BIBLE (Detail the core lore elements, magic systems, contract mechanics, family secrets, or setting rules of this specific book. Use the actual terms and concepts of this story, NOT generic placeholder terms or werewolf concepts unless the book is actually a werewolf story.)\n"
+        "4. CHARACTER RELATIONSHIP MATRIX (Detail the dynamics, tension, secrets, and chemistry between the major characters, specifically using their actual names and roles defined in the character bible.)\n"
         "5. STORY PROGRESSION & PROJECTED ENDING (A heavy, detailed projection into how the story is to progress through "
-        "future arcs, fated bond evolutions, key plot turning points, the definitive path to resolution, and exactly "
-        "how the story is projected to end in a high-tension fated climax.)\n\n"
+        "future arcs, relationship evolutions, key plot turning points, the definitive path to resolution, and exactly "
+        "how the story is projected to end in a high-tension climax.)\n\n"
         "Write with highly professional literary authority, leaving no stone unturned. Make sure the output is extensive, reaching a high word count of approximately 2000 words, detailed, and completely immersive."
     )
     
@@ -701,7 +701,13 @@ def generate_comprehensive_plot_bible(title, character_bible, style_guide, chapt
         draft_data += f"--- CHAPTER {ch['chapter_number']}: {ch['title']} ---\n{ch['content']}\n\n"
 
     user_prompt = (
-        f"Generate a comprehensive, 2000-word master Plot Bible based on the book '{title}' and its first 5 drafted chapters:\n\n"
+        f"Generate a comprehensive, 2000-word master Plot Bible based on the book details:\n"
+        f"Title: {title}\n"
+        f"Genre: {genre}\n"
+        f"Synopsis: {synopsis}\n"
+        f"Character Bible: {character_bible}\n"
+        f"Structural Outline: {structural_outline}\n\n"
+        f"First drafted chapters:\n\n"
         f"{draft_data}"
     )
     if plot_summary_example and len(plot_summary_example.strip()) > 0:
@@ -822,7 +828,7 @@ def humanize_plot_bible_content(plot_bible_text):
         "   - Maintain active constructions and high verb variety.\n"
         "   - Strictly ban repetitive AI transitional buzzwords (e.g. delve, furthermore, moreover, testament, in conclusion, tapestry, intricate dance, shrouded).\n\n"
         "4. Strict Data Preservation\n"
-        "   - Do NOT omit, modify, or rewrite any core facts, names, lore structures (such as Obsidian Amulet, Selene, Joren), or milestones. Elevate the tone, but do not change the story itself."
+        "   - Do NOT omit, modify, or rewrite any core facts, names, setting elements, lore structures, or milestones. Elevate the tone, but do not change the story itself."
     )
     user_prompt = f"Here is the Plot Bible I need us to humanize:\n\n{plot_bible_text}\n\nStart directly with the humanized markdown text, preserving all headers."
     return call_llm(

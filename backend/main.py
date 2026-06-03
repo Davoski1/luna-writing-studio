@@ -424,7 +424,7 @@ def start_ocr_adaptation(book_id: str, background_tasks: BackgroundTasks):
 def generate_plot_bible(book_id: str, req: PlotBibleRequest = None):
     conn = db.get_db_connection()
     # 1. Fetch book details
-    book = db.execute_query(conn, "SELECT title, character_bible, style_guide FROM books WHERE id = ?", (book_id,), fetch_one=True)
+    book = db.execute_query(conn, "SELECT title, genre, synopsis, character_bible, structural_outline, style_guide FROM books WHERE id = ?", (book_id,), fetch_one=True)
     if not book:
         conn.close()
         raise HTTPException(status_code=404, detail="Book not found")
@@ -443,7 +443,10 @@ def generate_plot_bible(book_id: str, req: PlotBibleRequest = None):
     try:
         plot_bible_content = prompts.generate_comprehensive_plot_bible(
             title=book["title"],
+            genre=book["genre"],
+            synopsis=book["synopsis"],
             character_bible=book["character_bible"],
+            structural_outline=book["structural_outline"],
             style_guide=book["style_guide"],
             chapters_list=chapters,
             plot_summary_example=plot_summary_example
