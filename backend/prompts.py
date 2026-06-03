@@ -47,14 +47,15 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
     # If OpenRouter is configured in env, append Tier 1 (Paid OpenRouter) and Tier 2 (Free OpenRouter)
     if openrouter_key:
         or_endpoint = "https://openrouter.ai/api/v1/chat/completions"
-        if image_base64 or model_name in ["Phi-4-Vision", "x-ai/grok-2-vision-1212", OCR_API_MODEL]:
+        if image_base64 or model_name in ["Phi-4-Vision", "x-ai/grok-4.3", "x-ai/grok-4.20", "x-ai/grok-2-vision-1212", OCR_API_MODEL]:
             # Vision / OCR Tasks:
-            # Tier 1: Paid Grok 2 Vision & Paid Gemini 2.5 Flash
-            waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-2-vision-1212", "openrouter"))
+            # Tier 1: Paid Grok 4.3 / 4.20 & Paid Gemini 2.5 Flash
+            waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
+            waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.20", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash", "openrouter"))
-            # Tier 2: Free Gemini 2.5 Flash
-            waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash:free", "openrouter"))
-            waterfall.append((or_endpoint, openrouter_key, "google/gemini-1.5-flash:free", "openrouter"))
+            # Tier 2: Free / Low-cost fallback models
+            waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash-lite", "openrouter"))
+            waterfall.append((or_endpoint, openrouter_key, "nvidia/nemotron-nano-12b-v2-vl:free", "openrouter"))
         elif json_mode:
             # Logic & Planning Tasks:
             # Tier 1: Paid DeepSeek R1 & Grok 4.3
@@ -68,15 +69,15 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
             # Tier 1: Paid Grok 4.3 & Paid Gemini 2.5 Flash
             waterfall.append((or_endpoint, openrouter_key, "x-ai/grok-4.3", "openrouter"))
             waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash", "openrouter"))
-            # Tier 2: Free Llama 3.3 & Free Gemini 2.5 Flash
+            # Tier 2: Free Llama 3.3 & Low-cost Gemini 2.5 Flash Lite
             waterfall.append((or_endpoint, openrouter_key, "meta-llama/llama-3.3-70b-instruct:free", "openrouter"))
-            waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash:free", "openrouter"))
+            waterfall.append((or_endpoint, openrouter_key, "google/gemini-2.5-flash-lite", "openrouter"))
             
     # Always ensure the original Azure system models are appended as Tier 3 (Final Fallback)
     azure_endpoint = AZURE_OPENAI_ENDPOINT.strip() if AZURE_OPENAI_ENDPOINT else ""
     azure_key = AZURE_OPENAI_KEY
     azure_model = API_MODEL
-
+ 
     # If the user has configured direct xAI API credentials to use their free console credits,
     # and this is a creative prose/drafting task (not planning or vision), prioritize direct xAI Grok at the absolute top!
     is_xai_configured = "api.x.ai" in azure_endpoint.lower()
@@ -85,7 +86,7 @@ def call_llm(system_prompt, user_prompt, json_mode=False, image_base64=None, end
         waterfall.insert(0, (azure_endpoint, azure_key, xai_model, "standard"))
     
     # Vision tasks have their own dedicated Azure OCR fallback variables
-    if image_base64 or model_name in ["Phi-4-Vision", "x-ai/grok-2-vision-1212", OCR_API_MODEL]:
+    if image_base64 or model_name in ["Phi-4-Vision", "x-ai/grok-4.3", "x-ai/grok-4.20", "x-ai/grok-2-vision-1212", OCR_API_MODEL]:
         azure_endpoint = OCR_API_ENDPOINT.strip() if OCR_API_ENDPOINT else ""
         azure_key = OCR_API_KEY
         azure_model = OCR_API_MODEL
